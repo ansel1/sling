@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
@@ -43,7 +42,7 @@ type Sling struct {
 	// url tagged body struct (form)
 	bodyForm interface{}
 	// simply assigned body
-	body io.ReadCloser
+	body io.Reader
 	// flag to indent marshalled JSON
 	indentJSON bool
 }
@@ -249,12 +248,8 @@ func (s *Sling) BodyForm(bodyForm interface{}) *Sling {
 // If the provided body is also an io.Closer, the request Body will be closed
 // by http.Client methods.
 func (s *Sling) Body(body io.Reader) *Sling {
-	rc, ok := body.(io.ReadCloser)
-	if !ok && body != nil {
-		rc = ioutil.NopCloser(body)
-	}
-	if rc != nil {
-		s.body = rc
+	if body != nil {
+		s.body = body
 	}
 	return s
 }
