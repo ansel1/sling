@@ -4,8 +4,6 @@ Notable changes between releases.
 
 ## latest
 
-* Added Sling `Body` setter to set an `io.Reader` on the Request
-
 ## v1.0.0 (2015-05-23)
 
 * Added support for receiving and decoding error JSON structs
