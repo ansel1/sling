@@ -57,19 +57,25 @@ func New() *Sling {
 	}
 }
 
-// New returns a copy of a Sling for creating a new Sling with properties
+// New is an alias for Clone.
+// deprecated: Use Clone().
+func (s *Sling) New() *Sling {
+	return s.Clone()
+}
+
+// Clone returns a copy of a Sling for creating a new Sling with properties
 // from a parent Sling. For example,
 //
-// 	parentSling := sling.New().Client(client).Base("https://api.io/")
-// 	fooSling := parentSling.New().Get("foo/")
-// 	barSling := parentSling.New().Get("bar/")
+// 	parentSling := sling.Clone().Client(client).Base("https://api.io/")
+// 	fooSling := parentSling.Clone().Get("foo/")
+// 	barSling := parentSling.Clone().Get("bar/")
 //
 // fooSling and barSling will both use the same client, but send requests to
 // https://api.io/foo/ and https://api.io/bar/ respectively.
 //
 // Note that query and body values are copied so if pointer values are used,
 // mutating the original value will mutate the value within the child Sling.
-func (s *Sling) New() *Sling {
+func (s *Sling) Clone() *Sling {
 	// copy Headers pairs into new Header map
 	headerCopy := make(http.Header)
 	for k, v := range s.header {
