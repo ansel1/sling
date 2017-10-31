@@ -10,11 +10,15 @@ import (
 	"strings"
 
 	goquery "github.com/google/go-querystring/query"
+	"context"
+	"errors"
+	"io/ioutil"
 )
 
 const (
 	contentType     = "Content-Type"
 	jsonContentType = "application/json"
+	xmlContentType  = "application/xml"
 	formContentType = "application/x-www-form-urlencoded"
 )
 
@@ -25,42 +29,47 @@ type Doer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+type Marshaler interface {
+	Marshal(v interface{}) (data []byte, contentType string, err error)
+}
+
+type Unmarshaler interface {
+	Unmarshal(data []byte, contentType string, v interface{}) error
+}
+
+type MarshalFunc func(v interface{}) ([]byte, string, error)
+
+func (f MarshalFunc) Marshal(v interface{}) ([]byte, string, error) {
+	return f(v)
+}
+
+type UnmarshalFunc func(data []byte, contentType string, v interface{}) error
+
+func (f UnmarshalFunc) Unmarshal(data []byte, contentType string, v interface{}) error {
+	return f(data, contentType, v)
+}
+
+type GetBodyFunc func() (io.ReadCloser, error)
+
+
 // Sling is an HTTP Request builder and sender.
 type Sling struct {
 	// http Client for doing requests
 	httpClient Doer
-	// HTTP method (GET, POST, etc.)
-	method string
-	// raw url string for requests
-	rawURL string
-	// stores key-values pairs to add to request's Headers
-	header http.Header
-	// url tagged query structs
-	queryStructs []interface{}
-	// json tagged body struct
-	bodyJSON interface{}
-	// url tagged body struct (form)
-	bodyForm interface{}
-	// simply assigned body
-	body io.Reader
-	// flag to indent marshalled JSON
-	indentJSON bool
+	Template http.Request
+	// Additional query params appended to request
+	QueryParams url.Values
+	Marshaler   Marshaler
+	Unmarshaler Unmarshaler
+
+	bodyValue interface{}
+
+	Error error
 }
 
 // New returns a new Sling with an http DefaultClient.
 func New() *Sling {
-	return &Sling{
-		httpClient:   http.DefaultClient,
-		method:       "GET",
-		header:       make(http.Header),
-		queryStructs: make([]interface{}, 0),
-	}
-}
-
-// New is an alias for Clone.
-// deprecated: Use Clone().
-func (s *Sling) New() *Sling {
-	return s.Clone()
+	return &Sling{}
 }
 
 // Clone returns a copy of a Sling for creating a new Sling with properties
@@ -76,33 +85,33 @@ func (s *Sling) New() *Sling {
 // Note that query and body values are copied so if pointer values are used,
 // mutating the original value will mutate the value within the child Sling.
 func (s *Sling) Clone() *Sling {
-	// copy Headers pairs into new Header map
-	headerCopy := make(http.Header)
-	for k, v := range s.header {
-		headerCopy[k] = v
+
+	s2 := *s
+	s2.Template = s.cloneRequest()
+	if s.QueryParams != nil {
+		s2.QueryParams = url.Values{}
+		for k, v := range s.QueryParams {
+			s2.QueryParams[k] = v
+		}
 	}
-	return &Sling{
-		httpClient:   s.httpClient,
-		method:       s.method,
-		rawURL:       s.rawURL,
-		header:       headerCopy,
-		queryStructs: append([]interface{}{}, s.queryStructs...),
-		bodyJSON:     s.bodyJSON,
-		bodyForm:     s.bodyForm,
-		body:         s.body,
-		indentJSON:   s.indentJSON,
-	}
+	return &s2
 }
 
-// Http Client
-
-// Client sets the http Client used to do requests. If a nil client is given,
-// the http.DefaultClient will be used.
-func (s *Sling) Client(httpClient *http.Client) *Sling {
-	if httpClient == nil {
-		return s.Doer(http.DefaultClient)
+func (s *Sling) cloneRequest() http.Request {
+	req := s.Template
+	if s.Template.Header != nil {
+		// copy Headers pairs into new Header map
+		headerCopy := make(http.Header)
+		for k, v := range s.Template.Header {
+			headerCopy[k] = v
+		}
+		req.Header = headerCopy
 	}
-	return s.Doer(httpClient)
+	if s.Template.URL != nil {
+		u2 := *s.Template.URL
+		req.URL = &u2
+	}
+	return req
 }
 
 // Doer sets the custom Doer implementation used to do requests.
@@ -120,37 +129,37 @@ func (s *Sling) Doer(doer Doer) *Sling {
 
 // Head sets the Sling method to HEAD and sets the given pathURL.
 func (s *Sling) Head(pathURL string) *Sling {
-	s.method = "HEAD"
+	s.Template.Method = "HEAD"
 	return s.Path(pathURL)
 }
 
 // Get sets the Sling method to GET and sets the given pathURL.
 func (s *Sling) Get(pathURL string) *Sling {
-	s.method = "GET"
+	s.Template.Method = "GET"
 	return s.Path(pathURL)
 }
 
 // Post sets the Sling method to POST and sets the given pathURL.
 func (s *Sling) Post(pathURL string) *Sling {
-	s.method = "POST"
+	s.Template.Method = "POST"
 	return s.Path(pathURL)
 }
 
 // Put sets the Sling method to PUT and sets the given pathURL.
 func (s *Sling) Put(pathURL string) *Sling {
-	s.method = "PUT"
+	s.Template.Method = "PUT"
 	return s.Path(pathURL)
 }
 
 // Patch sets the Sling method to PATCH and sets the given pathURL.
 func (s *Sling) Patch(pathURL string) *Sling {
-	s.method = "PATCH"
+	s.Template.Method = "PATCH"
 	return s.Path(pathURL)
 }
 
 // Delete sets the Sling method to DELETE and sets the given pathURL.
 func (s *Sling) Delete(pathURL string) *Sling {
-	s.method = "DELETE"
+	s.Template.Method = "DELETE"
 	return s.Path(pathURL)
 }
 
@@ -159,14 +168,20 @@ func (s *Sling) Delete(pathURL string) *Sling {
 // Add adds the key, value pair in Headers, appending values for existing keys
 // to the key's values. Header keys are canonicalized.
 func (s *Sling) Add(key, value string) *Sling {
-	s.header.Add(key, value)
+	if s.Template.Header == nil {
+		s.Template.Header = http.Header{}
+	}
+	s.Template.Header.Add(key, value)
 	return s
 }
 
 // Set sets the key, value pair in Headers, replacing existing values
 // associated with key. Header keys are canonicalized.
 func (s *Sling) Set(key, value string) *Sling {
-	s.header.Set(key, value)
+	if s.Template.Header == nil {
+		s.Template.Header = http.Header{}
+	}
+	s.Template.Header.Set(key, value)
 	return s
 }
 
@@ -189,18 +204,27 @@ func basicAuth(username, password string) string {
 // Base sets the rawURL. If you intend to extend the url with Path,
 // baseUrl should be specified with a trailing slash.
 func (s *Sling) Base(rawURL string) *Sling {
-	s.rawURL = rawURL
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		s.Error = err
+		return s
+	}
+	s.Template.URL = u
 	return s
 }
 
 // Path extends the rawURL with the given path by resolving the reference to
 // an absolute URL. If parsing errors occur, the rawURL is left unmodified.
 func (s *Sling) Path(path string) *Sling {
-	baseURL, baseErr := url.Parse(s.rawURL)
-	pathURL, pathErr := url.Parse(path)
-	if baseErr == nil && pathErr == nil {
-		s.rawURL = baseURL.ResolveReference(pathURL).String()
+	pathURL, err := url.Parse(path)
+	if err != nil {
+		s.Error = err
 		return s
+	}
+	if s.Template.URL == nil {
+		s.Template.URL = pathURL
+	} else {
+		s.Template.URL = s.Template.URL.ResolveReference(pathURL)
 	}
 	return s
 }
@@ -210,52 +234,30 @@ func (s *Sling) Path(path string) *Sling {
 // new requests (see Request()).
 // The queryStruct argument should be a pointer to a url tagged struct. See
 // https://godoc.org/github.com/google/go-querystring/query for details.
-func (s *Sling) QueryStruct(queryStruct interface{}) *Sling {
-	if queryStruct != nil {
-		s.queryStructs = append(s.queryStructs, queryStruct)
+func (s *Sling) AddQueryParams(queryStruct interface{}) *Sling {
+	if s.QueryParams == nil {
+		s.QueryParams = url.Values{}
 	}
-	return s
-}
-
-// Body
-
-// BodyJSON sets the Sling's bodyJSON. The value pointed to by the bodyJSON
-// will be JSON encoded as the Body on new requests (see Request()).
-// The bodyJSON argument should be a pointer to a JSON tagged struct. See
-// https://golang.org/pkg/encoding/json/#MarshalIndent for details.
-func (s *Sling) BodyJSON(bodyJSON interface{}) *Sling {
-	if bodyJSON != nil {
-		s.bodyJSON = bodyJSON
-		s.Set(contentType, jsonContentType)
+	var values url.Values
+	switch t := queryStruct.(type) {
+	case nil:
+	case url.Values:
+		values = t
+	default:
+		// encodes query structs into a url.Values map and merges maps
+		var err error
+		values, err = goquery.Values(queryStruct)
+		if err != nil {
+			s.Error = err
+			return s
+		}
 	}
-	return s
-}
 
-// IndentJSON sets whether BodyJSON indents the marshaled JSON
-func (s *Sling) IndentJSON(b bool) *Sling {
-	s.indentJSON = b
-	return s
-}
-
-// BodyForm sets the Sling's bodyForm. The value pointed to by the bodyForm
-// will be url encoded as the Body on new requests (see Request()).
-// The bodyStruct argument should be a pointer to a url tagged struct. See
-// https://godoc.org/github.com/google/go-querystring/query for details.
-func (s *Sling) BodyForm(bodyForm interface{}) *Sling {
-	if bodyForm != nil {
-		s.bodyForm = bodyForm
-		s.Set(contentType, formContentType)
-	}
-	return s
-}
-
-// Body sets the Sling's body. The body value will be set as the Body on new
-// requests (see Request()).
-// If the provided body is also an io.Closer, the request Body will be closed
-// by http.Client methods.
-func (s *Sling) Body(body io.Reader) *Sling {
-	if body != nil {
-		s.body = body
+	// merges new values into existing
+	for key, values := range values {
+		for _, value := range values {
+			s.QueryParams.Add(key, value)
+		}
 	}
 	return s
 }
@@ -265,26 +267,56 @@ func (s *Sling) Body(body io.Reader) *Sling {
 // Request returns a new http.Request created with the Sling properties.
 // Returns any errors parsing the rawURL, encoding query structs, encoding
 // the body, or creating the http.Request.
-func (s *Sling) Request() (*http.Request, error) {
-	reqURL, err := url.Parse(s.rawURL)
-	if err != nil {
-		return nil, err
+func (s *Sling) Request(ctx context.Context) (*http.Request, error) {
+	if s.Error != nil {
+		return nil, s.Error
 	}
 
-	err = addQueryStructs(reqURL, s.queryStructs)
+	// marshal body, if applicable
+	bodyData, ct, err := s.getRequestBody()
 	if err != nil {
 		return nil, err
 	}
-	body, err := s.getRequestBody()
+	if bodyData != nil {
+
+	}
+	http.NewRequest(s.Template.Method, "", bodyData)
+
+	req := s.cloneRequest()
+	if req.URL == nil {
+		return nil, errors.New("request URL cannot be nil")
+	}
+	if req.Method == "" {
+		req.Method = "GET"
+	}
+	if len(s.QueryParams) > 0 {
+		if req.URL.RawQuery != "" {
+			req.URL.RawQuery += "&" + s.QueryParams.Encode()
+		} else {
+			req.URL.RawQuery = s.QueryParams.Encode()
+		}
+	}
+
+
+	// marshal body, if applicable
+	bodyData, ct, err := s.getRequestBody()
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest(s.method, reqURL.String(), body)
-	if err != nil {
-		return nil, err
+	if bodyData != nil {
+		req.GetBody = func() (io.ReadCloser, error) {
+			return ioutil.NopCloser(bytes.NewReader(bodyData)), nil
+		}
+		req.Body, _ = req.GetBody()
+		req.ContentLength = (int64)(len(bodyData))
+		if ct != "" && req.Header.Get(contentType) == "" {
+			if req.Header == nil {
+				req.Header = http.Header{}
+			}
+			req.Header.Set(contentType, ct)
+		}
 	}
-	addHeaders(req, s.header)
-	return req, err
+	return &req, err
 }
 
 // addQueryStructs parses url tagged query structs using go-querystring to
@@ -312,62 +344,21 @@ func addQueryStructs(reqURL *url.URL, queryStructs []interface{}) error {
 	return nil
 }
 
+var DefaultMarshaler Marshaler = MarshalFunc(MarshalJSON)
+var DefaultUnmarshaler Unmarshaler = UnmarshalFunc(UnmarshalMulti)
+
 // getRequestBody returns the io.Reader which should be used as the body
 // of new Requests.
-func (s *Sling) getRequestBody() (body io.Reader, err error) {
-	if s.bodyJSON != nil && s.header.Get(contentType) == jsonContentType {
-		body, err = encodeBodyJSON(s.bodyJSON, s.indentJSON)
-		if err != nil {
-			return nil, err
-		}
-	} else if s.bodyForm != nil && s.header.Get(contentType) == formContentType {
-		body, err = encodeBodyForm(s.bodyForm)
-		if err != nil {
-			return nil, err
-		}
-	} else if s.body != nil {
-		body = s.body
+func (s *Sling) getRequestBody() (data []byte, contentType string, err error) {
+	if s.bodyValue == nil {
+		return nil, "", nil
 	}
-	return body, nil
-}
+	marshaler := s.Marshaler
+	if marshaler == nil {
+		marshaler = DefaultMarshaler
+	}
 
-// encodeBodyJSON JSON encodes the value pointed to by bodyJSON into an
-// io.Reader, typically for use as a Request Body.
-func encodeBodyJSON(bodyJSON interface{}, indent bool) (io.Reader, error) {
-	var buf = new(bytes.Buffer)
-	if bodyJSON != nil {
-		buf = &bytes.Buffer{}
-		err := json.NewEncoder(buf).Encode(bodyJSON)
-		if err != nil {
-			return nil, err
-		}
-		if indent {
-			indented := &bytes.Buffer{}
-			json.Indent(indented, buf.Bytes(), "", "  ")
-			buf = indented
-		}
-	}
-	return buf, nil
-}
-
-// encodeBodyForm url encodes the value pointed to by bodyForm into an
-// io.Reader, typically for use as a Request Body.
-func encodeBodyForm(bodyForm interface{}) (io.Reader, error) {
-	values, err := goquery.Values(bodyForm)
-	if err != nil {
-		return nil, err
-	}
-	return strings.NewReader(values.Encode()), nil
-}
-
-// addHeaders adds the key, value pairs from the given http.Header to the
-// request. Values for existing keys are appended to the keys values.
-func addHeaders(req *http.Request, header http.Header) {
-	for key, values := range header {
-		for _, value := range values {
-			req.Header.Add(key, value)
-		}
-	}
+	return marshaler.Marshal(s.BodyValue)
 }
 
 // Sending
