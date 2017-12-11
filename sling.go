@@ -3,16 +3,13 @@ package sling
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
-
-	goquery "github.com/google/go-querystring/query"
 	"context"
-	"errors"
 	"io/ioutil"
+	"strings"
+	"github.com/ansel1/merry"
 )
 
 const (
@@ -22,58 +19,93 @@ const (
 	formContentType = "application/x-www-form-urlencoded"
 )
 
-// Doer executes http requests.  It is implemented by *http.Client.  You can
-// wrap *http.Client with layers of Doers to form a stack of client-side
-// middleware.
-type Doer interface {
-	Do(req *http.Request) (*http.Response, error)
-}
-
-type Marshaler interface {
-	Marshal(v interface{}) (data []byte, contentType string, err error)
-}
-
-type Unmarshaler interface {
-	Unmarshal(data []byte, contentType string, v interface{}) error
-}
-
-type MarshalFunc func(v interface{}) ([]byte, string, error)
-
-func (f MarshalFunc) Marshal(v interface{}) ([]byte, string, error) {
-	return f(v)
-}
-
-type UnmarshalFunc func(data []byte, contentType string, v interface{}) error
-
-func (f UnmarshalFunc) Unmarshal(data []byte, contentType string, v interface{}) error {
-	return f(data, contentType, v)
-}
-
-type GetBodyFunc func() (io.ReadCloser, error)
 
 
-// Sling is an HTTP Request builder and sender.
-type Sling struct {
+// Builder is an HTTP Request builder and sender.
+type Builder struct {
 	// http Client for doing requests
-	httpClient Doer
-	Template http.Request
-	// Additional query params appended to request
+	Doer Doer
+
+	Method           string
+	URL              *url.URL
+	Header           http.Header
+
+	// advanced options, not typically used.  If not sure, leave them
+	// blank
+	GetBody          func() (io.ReadCloser, error)
+	ContentLength    int64
+	TransferEncoding []string
+	Close            bool
+	Host             string
+	Trailer          http.Header
+
+	// QueryParams are added to the request, in addition to any
+	// query params already encoded in the URL
 	QueryParams url.Values
+
+
 	Marshaler   Marshaler
 	Unmarshaler Unmarshaler
 
-	bodyValue interface{}
-
-	Error error
+	Body interface{}
 }
 
-// New returns a new Sling with an http DefaultClient.
-func New() *Sling {
-	return &Sling{}
+// New returns a new Builder with an http DefaultClient.
+func New(options ...Option) (*Builder, error) {
+	b := &Builder{}
+	err := b.Apply(options...)
+	if err != nil {
+		return nil, merry.Wrap(err)
+	}
+	return b, nil
 }
 
-// Clone returns a copy of a Sling for creating a new Sling with properties
-// from a parent Sling. For example,
+func cloneURL(url *url.URL) *url.URL {
+	if url == nil {
+		return nil
+	}
+	urlCopy := *url
+	return &urlCopy
+}
+
+func cloneValues(v url.Values) url.Values {
+	if v == nil {
+		return nil
+	}
+	v2 := make(url.Values, len(v))
+	for key, value := range v {
+		v2[key] = value
+	}
+	return v2
+}
+
+func cloneHeader(h http.Header) http.Header {
+	if h == nil {
+		return nil
+	}
+	h2 := make(http.Header)
+	for key, value := range h {
+		h2[key] = value
+	}
+	return h2
+}
+
+func NewFromRequest(req *http.Request) *Builder {
+	return &Builder{
+		Method:           req.Method,
+		Header:           cloneHeader(req.Header),
+		GetBody:          req.GetBody,
+		ContentLength:    req.ContentLength,
+		TransferEncoding: req.TransferEncoding,
+		Close:            req.Close,
+		Host:             req.Host,
+		Trailer:          cloneHeader(req.Trailer),
+		URL:              cloneURL(req.URL),
+	}
+}
+
+// Clone returns a copy of a Builder for creating a new Builder with properties
+// from a parent Builder. For example,
 //
 // 	parentSling := sling.Clone().Client(client).Base("https://api.io/")
 // 	fooSling := parentSling.Clone().Get("foo/")
@@ -83,114 +115,88 @@ func New() *Sling {
 // https://api.io/foo/ and https://api.io/bar/ respectively.
 //
 // Note that query and body values are copied so if pointer values are used,
-// mutating the original value will mutate the value within the child Sling.
-func (s *Sling) Clone() *Sling {
-
+// mutating the original value will mutate the value within the child Builder.
+func (s *Builder) Clone() *Builder {
 	s2 := *s
-	s2.Template = s.cloneRequest()
-	if s.QueryParams != nil {
-		s2.QueryParams = url.Values{}
-		for k, v := range s.QueryParams {
-			s2.QueryParams[k] = v
-		}
-	}
+	s2.Header = cloneHeader(s.Header)
+	s2.Trailer = cloneHeader(s.Trailer)
+	s2.URL = cloneURL(s.URL)
+	s2.QueryParams = cloneValues(s.QueryParams)
 	return &s2
-}
-
-func (s *Sling) cloneRequest() http.Request {
-	req := s.Template
-	if s.Template.Header != nil {
-		// copy Headers pairs into new Header map
-		headerCopy := make(http.Header)
-		for k, v := range s.Template.Header {
-			headerCopy[k] = v
-		}
-		req.Header = headerCopy
-	}
-	if s.Template.URL != nil {
-		u2 := *s.Template.URL
-		req.URL = &u2
-	}
-	return req
-}
-
-// Doer sets the custom Doer implementation used to do requests.
-// If a nil client is given, the http.DefaultClient will be used.
-func (s *Sling) Doer(doer Doer) *Sling {
-	if doer == nil {
-		s.httpClient = http.DefaultClient
-	} else {
-		s.httpClient = doer
-	}
-	return s
 }
 
 // Method
 
-// Head sets the Sling method to HEAD and sets the given pathURL.
-func (s *Sling) Head(pathURL string) *Sling {
-	s.Template.Method = "HEAD"
-	return s.Path(pathURL)
-}
+// Head sets the Builder method to HEAD and sets the given pathURL.
+//func (s *Builder) Head(pathURL string) *Builder {
+//	s2 := s.Path(pathURL)
+//	s2.Method = "HEAD"
+//	return s2
+//}
 
-// Get sets the Sling method to GET and sets the given pathURL.
-func (s *Sling) Get(pathURL string) *Sling {
-	s.Template.Method = "GET"
-	return s.Path(pathURL)
-}
+// Get sets the Builder method to GET and sets the given pathURL.
+//func (s *Builder) Get(pathURL string) *Builder {
+//	s2 := s.Path("GET")
+//	s2.Method = "GET"
+//	return s2
+//}
 
-// Post sets the Sling method to POST and sets the given pathURL.
-func (s *Sling) Post(pathURL string) *Sling {
-	s.Template.Method = "POST"
-	return s.Path(pathURL)
-}
+// Post sets the Builder method to POST and sets the given pathURL.
+//func (s *Builder) Post(pathURL string) *Builder {
+//	s2 := s.Path(pathURL)
+//	s2.Method = "POST"
+//	return s2
+//}
 
-// Put sets the Sling method to PUT and sets the given pathURL.
-func (s *Sling) Put(pathURL string) *Sling {
-	s.Template.Method = "PUT"
-	return s.Path(pathURL)
-}
+// Put sets the Builder method to PUT and sets the given pathURL.
+//func (s *Builder) Put(pathURL string) *Builder {
+//	s2 := s.Path(pathURL)
+//	s2.Method = "PUT"
+//	return s2
+//}
 
-// Patch sets the Sling method to PATCH and sets the given pathURL.
-func (s *Sling) Patch(pathURL string) *Sling {
-	s.Template.Method = "PATCH"
-	return s.Path(pathURL)
-}
+// Patch sets the Builder method to PATCH and sets the given pathURL.
+//func (s *Builder) Patch(pathURL string) *Builder {
+//	s2 := s.Path(pathURL)
+//	s2.Method = "PATCH"
+//	return s2
+//}
 
-// Delete sets the Sling method to DELETE and sets the given pathURL.
-func (s *Sling) Delete(pathURL string) *Sling {
-	s.Template.Method = "DELETE"
-	return s.Path(pathURL)
-}
+// Delete sets the Builder method to DELETE and sets the given pathURL.
+//func (s *Builder) Delete(pathURL string) *Builder {
+//	s2 := s.Path(pathURL)
+//	s2.Method = "DELETE"
+//	return s2
+//}
 
 // Header
 
-// Add adds the key, value pair in Headers, appending values for existing keys
+// AddHeader adds the key, value pair in Headers, appending values for existing keys
 // to the key's values. Header keys are canonicalized.
-func (s *Sling) Add(key, value string) *Sling {
-	if s.Template.Header == nil {
-		s.Template.Header = http.Header{}
-	}
-	s.Template.Header.Add(key, value)
-	return s
-}
+//func (s *Builder) AddHeader(key, value string) *Builder {
+//	if s.Header == nil {
+//		s.Header = make(http.Header)
+//	}
+//	s.Header.Add(key, value)
+//	return s
+//}
 
-// Set sets the key, value pair in Headers, replacing existing values
+// SetHeader sets the key, value pair in Headers, replacing existing values
 // associated with key. Header keys are canonicalized.
-func (s *Sling) Set(key, value string) *Sling {
-	if s.Template.Header == nil {
-		s.Template.Header = http.Header{}
-	}
-	s.Template.Header.Set(key, value)
-	return s
-}
+//func (s *Builder) SetHeader(key, value string) *Builder {
+//	if s.Header == nil {
+//		s.Header = make(http.Header)
+//	}
+//	s.Header.Set(key, value)
+//	return s
+//}
 
 // SetBasicAuth sets the Authorization header to use HTTP Basic Authentication
 // with the provided username and password. With HTTP Basic Authentication
 // the provided username and password are not encrypted.
-func (s *Sling) SetBasicAuth(username, password string) *Sling {
-	return s.Set("Authorization", "Basic "+basicAuth(username, password))
-}
+//func (s *Builder) SetBasicAuth(username, password string) *Builder {
+//	return s.SetHeader("Authorization", "Basic "+basicAuth(username, password))
+//}
 
 // basicAuth returns the base64 encoded username:password for basic auth copied
 // from net/http.
@@ -199,96 +205,122 @@ func basicAuth(username, password string) string {
 	return base64.StdEncoding.EncodeToString([]byte(auth))
 }
 
+//func (s *Builder) SetBearerTokenAuth(bearerToken string) *Builder {
+//	return s.SetHeader("Authorization", "Bearer "+bearerToken)
+//}
+
 // Url
 
-// Base sets the rawURL. If you intend to extend the url with Path,
+// Base sets the base. If you intend to extend the url with URLString,
 // baseUrl should be specified with a trailing slash.
-func (s *Sling) Base(rawURL string) *Sling {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		s.Error = err
-		return s
-	}
-	s.Template.URL = u
-	return s
-}
+//func (s *Builder) Base(base string) *Builder {
+//	u, err := url.Parse(base)
+//	if err != nil {
+//		s.Error = err
+//		return s
+//	}
+//	s.URL = u
+//	return s
+//}
 
-// Path extends the rawURL with the given path by resolving the reference to
-// an absolute URL. If parsing errors occur, the rawURL is left unmodified.
-func (s *Sling) Path(path string) *Sling {
-	pathURL, err := url.Parse(path)
-	if err != nil {
-		s.Error = err
-		return s
-	}
-	if s.Template.URL == nil {
-		s.Template.URL = pathURL
-	} else {
-		s.Template.URL = s.Template.URL.ResolveReference(pathURL)
-	}
-	return s
-}
+// URLString extends the base with the given relPath by resolving the reference to
+// an absolute URL. If parsing errors occur, the base is left unmodified.
+//func (s *Builder) Path(relPath string) *Builder {
+//	pathURL, err := url.Parse(relPath)
+//	if err != nil {
+//		s.Error = err
+//		return s
+//	}
+//	if s.URL == nil {
+//		s.URL = pathURL
+//	} else {
+//		s.URL = s.URL.ResolveReference(pathURL)
+//	}
+//	return s
+//}
 
-// QueryStruct appends the queryStruct to the Sling's queryStructs. The value
+// QueryStruct appends the queryStruct to the Builder's queryStructs. The value
 // pointed to by each queryStruct will be encoded as url query parameters on
 // new requests (see Request()).
 // The queryStruct argument should be a pointer to a url tagged struct. See
 // https://godoc.org/github.com/google/go-querystring/query for details.
-func (s *Sling) AddQueryParams(queryStruct interface{}) *Sling {
-	if s.QueryParams == nil {
-		s.QueryParams = url.Values{}
-	}
-	var values url.Values
-	switch t := queryStruct.(type) {
-	case nil:
-	case url.Values:
-		values = t
-	default:
-		// encodes query structs into a url.Values map and merges maps
-		var err error
-		values, err = goquery.Values(queryStruct)
-		if err != nil {
-			s.Error = err
-			return s
-		}
-	}
-
-	// merges new values into existing
-	for key, values := range values {
-		for _, value := range values {
-			s.QueryParams.Add(key, value)
-		}
-	}
-	return s
-}
+//func (s *Builder) AddQueryParams(queryStruct interface{}) *Builder {
+//	if s.QueryParams == nil {
+//		s.QueryParams = url.Values{}
+//	}
+//	var values url.Values
+//	switch t := queryStruct.(type) {
+//	case nil:
+//	case url.Values:
+//		values = t
+//	default:
+//		// encodes query structs into a url.Values map and merges maps
+//		var err error
+//		values, err = goquery.Values(queryStruct)
+//		if err != nil {
+//			s.Error = err
+//			return s
+//		}
+//	}
+//
+//	// merges new values into existing
+//	for key, values := range values {
+//		for _, value := range values {
+//			s.QueryParams.Add(key, value)
+//		}
+//	}
+//	return s
+//}
 
 // Requests
 
-// Request returns a new http.Request created with the Sling properties.
-// Returns any errors parsing the rawURL, encoding query structs, encoding
+// Request returns a new http.Request created with the Builder properties.
+// Returns any errors parsing the base, encoding query structs, encoding
 // the body, or creating the http.Request.
-func (s *Sling) Request(ctx context.Context) (*http.Request, error) {
-	if s.Error != nil {
-		return nil, s.Error
-	}
-
+func (s *Builder) Request(ctx context.Context) (*http.Request, error) {
 	// marshal body, if applicable
 	bodyData, ct, err := s.getRequestBody()
 	if err != nil {
 		return nil, err
 	}
-	if bodyData != nil {
 
+	urlS := ""
+	if s.URL != nil {
+		urlS = s.URL.String()
 	}
-	http.NewRequest(s.Template.Method, "", bodyData)
 
-	req := s.cloneRequest()
-	if req.URL == nil {
-		return nil, errors.New("request URL cannot be nil")
+	req, err := http.NewRequest(s.Method, urlS, bodyData)
+	if err != nil {
+		return nil, err
 	}
-	if req.Method == "" {
-		req.Method = "GET"
+
+	// if we marshaled the body, use our content type
+	if ct != "" {
+		req.Header.Set("Content-Type", ct)
 	}
+
+	if s.ContentLength != 0 {
+		req.ContentLength = s.ContentLength
+	}
+
+	if s.GetBody != nil {
+		req.GetBody = s.GetBody
+	}
+
+	// copy the host
+	if s.Host != "" {
+		req.Host = s.Host
+	}
+
+	req.TransferEncoding = s.TransferEncoding
+	req.Close = s.Close
+	req.Trailer = s.Trailer
+
+	// copy Headers pairs into new Header map
+	for k, v := range s.Header {
+		req.Header[k] = v
+	}
+
 	if len(s.QueryParams) > 0 {
 		if req.URL.RawQuery != "" {
 			req.URL.RawQuery += "&" + s.QueryParams.Encode()
@@ -297,78 +329,57 @@ func (s *Sling) Request(ctx context.Context) (*http.Request, error) {
 		}
 	}
 
-
-	// marshal body, if applicable
-	bodyData, ct, err := s.getRequestBody()
-	if err != nil {
-		return nil, err
-	}
-	if bodyData != nil {
-		req.GetBody = func() (io.ReadCloser, error) {
-			return ioutil.NopCloser(bytes.NewReader(bodyData)), nil
-		}
-		req.Body, _ = req.GetBody()
-		req.ContentLength = (int64)(len(bodyData))
-		if ct != "" && req.Header.Get(contentType) == "" {
-			if req.Header == nil {
-				req.Header = http.Header{}
-			}
-			req.Header.Set(contentType, ct)
-		}
-	}
-	return &req, err
+	return req.WithContext(ctx), err
 }
 
-// addQueryStructs parses url tagged query structs using go-querystring to
-// encode them to url.Values and format them onto the url.RawQuery. Any
-// query parsing or encoding errors are returned.
-func addQueryStructs(reqURL *url.URL, queryStructs []interface{}) error {
-	urlValues, err := url.ParseQuery(reqURL.RawQuery)
-	if err != nil {
-		return err
-	}
-	// encodes query structs into a url.Values map and merges maps
-	for _, queryStruct := range queryStructs {
-		queryValues, err := goquery.Values(queryStruct)
-		if err != nil {
-			return err
-		}
-		for key, values := range queryValues {
-			for _, value := range values {
-				urlValues.Add(key, value)
-			}
-		}
-	}
-	// url.Values format to a sorted "url encoded" string, e.g. "key=val&foo=bar"
-	reqURL.RawQuery = urlValues.Encode()
-	return nil
-}
-
-var DefaultMarshaler Marshaler = MarshalFunc(MarshalJSON)
-var DefaultUnmarshaler Unmarshaler = UnmarshalFunc(UnmarshalMulti)
+var DefaultMarshaler Marshaler = &JSONMarshaler{}
+var DefaultUnmarshaler Unmarshaler = &MultiUnmarshaler{}
 
 // getRequestBody returns the io.Reader which should be used as the body
 // of new Requests.
-func (s *Sling) getRequestBody() (data []byte, contentType string, err error) {
-	if s.bodyValue == nil {
+func (s *Builder) getRequestBody() (body io.Reader, contentType string, err error) {
+	switch v := s.Body.(type) {
+	case nil:
 		return nil, "", nil
+	case io.Reader:
+		return v, "", nil
+	case string:
+		return strings.NewReader(v), "", nil
+	case []byte:
+		return bytes.NewReader(v), "", nil
+	default:
+		marshaler := s.Marshaler
+		if marshaler == nil {
+			marshaler = DefaultMarshaler
+		}
+		b, ct, err := marshaler.Marshal(s.Body)
+		if err != nil {
+			return nil, "", err
+		}
+		return bytes.NewReader(b), ct, err
 	}
-	marshaler := s.Marshaler
-	if marshaler == nil {
-		marshaler = DefaultMarshaler
-	}
-
-	return marshaler.Marshal(s.BodyValue)
 }
 
 // Sending
+
+func (s *Builder) Do(ctx context.Context) (*http.Response, error) {
+	req, err := s.Request(ctx)
+	if err != nil {
+		return nil, err
+	}
+	doer := s.Doer
+	if doer == nil {
+		doer = http.DefaultClient
+	}
+	return doer.Do(req)
+}
 
 // ReceiveSuccess creates a new HTTP request and returns the response. Success
 // responses (2XX) are JSON decoded into the value pointed to by successV.
 // Any error creating the request, sending it, or decoding a 2XX response
 // is returned.
-func (s *Sling) ReceiveSuccess(successV interface{}) (*http.Response, error) {
-	return s.Receive(successV, nil)
+func (s *Builder) ReceiveSuccess(ctx context.Context, successV interface{}) (*http.Response, error) {
+	return s.Receive(ctx, successV, nil)
 }
 
 // Receive creates a new HTTP request and returns the response. Success
@@ -377,62 +388,37 @@ func (s *Sling) ReceiveSuccess(successV interface{}) (*http.Response, error) {
 // Any error creating the request, sending it, or decoding the response is
 // returned.
 // Receive is shorthand for calling Request and Do.
-func (s *Sling) Receive(successV, failureV interface{}) (*http.Response, error) {
-	req, err := s.Request()
+func (s *Builder) Receive(ctx context.Context, successV, failureV interface{}) (*http.Response, error) {
+	resp, err := s.Do(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return s.Do(req, successV, failureV)
-}
+	unmarshaler := s.Unmarshaler
+	if unmarshaler == nil {
+		unmarshaler = DefaultUnmarshaler
+	}
+	var unmarshalInto interface{}
+	if code := resp.StatusCode; 200 <= code && code <= 299 {
+		unmarshalInto = successV
+	} else {
+		unmarshalInto = failureV
+	}
 
-// Do sends an HTTP request and returns the response. Success responses (2XX)
-// are JSON decoded into the value pointed to by successV and other responses
-// are JSON decoded into the value pointed to by failureV.
-// Any error sending the request or decoding the response is returned.
-func (s *Sling) Do(req *http.Request, successV, failureV interface{}) (*http.Response, error) {
-	resp, err := s.httpClient.Do(req)
+	defer resp.Body.Close()
+
+	b, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return resp, err
 	}
-	// when err is nil, resp contains a non-nil resp.Body which must be closed
-	defer resp.Body.Close()
-
-	// Don't try to decode on 204s
-	if resp.StatusCode == 204 {
-		return resp, nil
-	}
-
-	if successV == nil && failureV == nil {
-		return resp, nil
-	}
-
-	if strings.Contains(resp.Header.Get(contentType), jsonContentType) {
-		err = decodeResponseJSON(resp, successV, failureV)
-	}
-	return resp, err
-}
-
-// decodeResponse decodes response Body into the value pointed to by successV
-// if the response is a success (2XX) or into the value pointed to by failureV
-// otherwise. If the successV or failureV argument to decode into is nil,
-// decoding is skipped.
-// Caller is responsible for closing the resp.Body.
-func decodeResponseJSON(resp *http.Response, successV, failureV interface{}) error {
-	if code := resp.StatusCode; 200 <= code && code <= 299 {
-		if successV != nil {
-			return decodeResponseBodyJSON(resp, successV)
-		}
-	} else {
-		if failureV != nil {
-			return decodeResponseBodyJSON(resp, failureV)
+	switch v := unmarshalInto.(type) {
+	case *string:
+		// return the raw body as a string.
+		*v = string(b)
+	default:
+		err = unmarshaler.Unmarshal(b, resp.Header.Get("Content-Type"), unmarshalInto)
+		if err != nil {
+			return resp, err
 		}
 	}
-	return nil
-}
-
-// decodeResponseBodyJSON JSON decodes a Response Body into the value pointed
-// to by v.
-// Caller must provide a non-nil v and close the resp.Body.
-func decodeResponseBodyJSON(resp *http.Response, v interface{}) error {
-	return json.NewDecoder(resp.Body).Decode(v)
+	return resp, nil
 }
