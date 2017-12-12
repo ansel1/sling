@@ -2,7 +2,6 @@ package sling
 
 import (
 	"bytes"
-	"encoding/base64"
 	"io"
 	"net/http"
 	"net/url"
@@ -125,153 +124,6 @@ func (s *Builder) Clone() *Builder {
 	return &s2
 }
 
-// Method
-
-// Head sets the Builder method to HEAD and sets the given pathURL.
-//func (s *Builder) Head(pathURL string) *Builder {
-//	s2 := s.Path(pathURL)
-//	s2.Method = "HEAD"
-//	return s2
-//}
-
-// Get sets the Builder method to GET and sets the given pathURL.
-//func (s *Builder) Get(pathURL string) *Builder {
-//	s2 := s.Path("GET")
-//	s2.Method = "GET"
-//	return s2
-//}
-
-// Post sets the Builder method to POST and sets the given pathURL.
-//func (s *Builder) Post(pathURL string) *Builder {
-//	s2 := s.Path(pathURL)
-//	s2.Method = "POST"
-//	return s2
-//}
-
-// Put sets the Builder method to PUT and sets the given pathURL.
-//func (s *Builder) Put(pathURL string) *Builder {
-//	s2 := s.Path(pathURL)
-//	s2.Method = "PUT"
-//	return s2
-//}
-
-// Patch sets the Builder method to PATCH and sets the given pathURL.
-//func (s *Builder) Patch(pathURL string) *Builder {
-//	s2 := s.Path(pathURL)
-//	s2.Method = "PATCH"
-//	return s2
-//}
-
-// Delete sets the Builder method to DELETE and sets the given pathURL.
-//func (s *Builder) Delete(pathURL string) *Builder {
-//	s2 := s.Path(pathURL)
-//	s2.Method = "DELETE"
-//	return s2
-//}
-
-// Header
-
-// AddHeader adds the key, value pair in Headers, appending values for existing keys
-// to the key's values. Header keys are canonicalized.
-//func (s *Builder) AddHeader(key, value string) *Builder {
-//	if s.Header == nil {
-//		s.Header = make(http.Header)
-//	}
-//	s.Header.Add(key, value)
-//	return s
-//}
-
-// SetHeader sets the key, value pair in Headers, replacing existing values
-// associated with key. Header keys are canonicalized.
-//func (s *Builder) SetHeader(key, value string) *Builder {
-//	if s.Header == nil {
-//		s.Header = make(http.Header)
-//	}
-//	s.Header.Set(key, value)
-//	return s
-//}
-
-// SetBasicAuth sets the Authorization header to use HTTP Basic Authentication
-// with the provided username and password. With HTTP Basic Authentication
-// the provided username and password are not encrypted.
-//func (s *Builder) SetBasicAuth(username, password string) *Builder {
-//	return s.SetHeader("Authorization", "Basic "+basicAuth(username, password))
-//}
-
-// basicAuth returns the base64 encoded username:password for basic auth copied
-// from net/http.
-func basicAuth(username, password string) string {
-	auth := username + ":" + password
-	return base64.StdEncoding.EncodeToString([]byte(auth))
-}
-
-//func (s *Builder) SetBearerTokenAuth(bearerToken string) *Builder {
-//	return s.SetHeader("Authorization", "Bearer "+bearerToken)
-//}
-
-// Url
-
-// Base sets the base. If you intend to extend the url with URLString,
-// baseUrl should be specified with a trailing slash.
-//func (s *Builder) Base(base string) *Builder {
-//	u, err := url.Parse(base)
-//	if err != nil {
-//		s.Error = err
-//		return s
-//	}
-//	s.URL = u
-//	return s
-//}
-
-// URLString extends the base with the given relPath by resolving the reference to
-// an absolute URL. If parsing errors occur, the base is left unmodified.
-//func (s *Builder) Path(relPath string) *Builder {
-//	pathURL, err := url.Parse(relPath)
-//	if err != nil {
-//		s.Error = err
-//		return s
-//	}
-//	if s.URL == nil {
-//		s.URL = pathURL
-//	} else {
-//		s.URL = s.URL.ResolveReference(pathURL)
-//	}
-//	return s
-//}
-
-// QueryStruct appends the queryStruct to the Builder's queryStructs. The value
-// pointed to by each queryStruct will be encoded as url query parameters on
-// new requests (see Request()).
-// The queryStruct argument should be a pointer to a url tagged struct. See
-// https://godoc.org/github.com/google/go-querystring/query for details.
-//func (s *Builder) AddQueryParams(queryStruct interface{}) *Builder {
-//	if s.QueryParams == nil {
-//		s.QueryParams = url.Values{}
-//	}
-//	var values url.Values
-//	switch t := queryStruct.(type) {
-//	case nil:
-//	case url.Values:
-//		values = t
-//	default:
-//		// encodes query structs into a url.Values map and merges maps
-//		var err error
-//		values, err = goquery.Values(queryStruct)
-//		if err != nil {
-//			s.Error = err
-//			return s
-//		}
-//	}
-//
-//	// merges new values into existing
-//	for key, values := range values {
-//		for _, value := range values {
-//			s.QueryParams.Add(key, value)
-//		}
-//	}
-//	return s
-//}
-
 // Requests
 
 // Request returns a new http.Request created with the Builder properties.
@@ -332,9 +184,6 @@ func (s *Builder) Request(ctx context.Context) (*http.Request, error) {
 	return req.WithContext(ctx), err
 }
 
-var DefaultMarshaler Marshaler = &JSONMarshaler{}
-var DefaultUnmarshaler Unmarshaler = &MultiUnmarshaler{}
-
 // getRequestBody returns the io.Reader which should be used as the body
 // of new Requests.
 func (s *Builder) getRequestBody() (body io.Reader, contentType string, err error) {
@@ -378,7 +227,7 @@ func (s *Builder) Do(ctx context.Context) (*http.Response, error) {
 // responses (2XX) are JSON decoded into the value pointed to by successV.
 // Any error creating the request, sending it, or decoding a 2XX response
 // is returned.
-func (s *Builder) ReceiveSuccess(ctx context.Context, successV interface{}) (*http.Response, error) {
+func (s *Builder) ReceiveSuccess(ctx context.Context, successV interface{}) (resp *http.Response, body []byte, err error) {
 	return s.Receive(ctx, successV, nil)
 }
 
@@ -388,15 +237,19 @@ func (s *Builder) ReceiveSuccess(ctx context.Context, successV interface{}) (*ht
 // Any error creating the request, sending it, or decoding the response is
 // returned.
 // Receive is shorthand for calling Request and Do.
-func (s *Builder) Receive(ctx context.Context, successV, failureV interface{}) (*http.Response, error) {
-	resp, err := s.Do(ctx)
+func (s *Builder) Receive(ctx context.Context, successV, failureV interface{}) (resp *http.Response, body []byte, err error) {
+	resp, err = s.Do(ctx)
 	if err != nil {
-		return nil, err
+		return
 	}
-	unmarshaler := s.Unmarshaler
-	if unmarshaler == nil {
-		unmarshaler = DefaultUnmarshaler
+
+	defer resp.Body.Close()
+
+	body, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return
 	}
+
 	var unmarshalInto interface{}
 	if code := resp.StatusCode; 200 <= code && code <= 299 {
 		unmarshalInto = successV
@@ -404,21 +257,13 @@ func (s *Builder) Receive(ctx context.Context, successV, failureV interface{}) (
 		unmarshalInto = failureV
 	}
 
-	defer resp.Body.Close()
-
-	b, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return resp, err
-	}
-	switch v := unmarshalInto.(type) {
-	case *string:
-		// return the raw body as a string.
-		*v = string(b)
-	default:
-		err = unmarshaler.Unmarshal(b, resp.Header.Get("Content-Type"), unmarshalInto)
-		if err != nil {
-			return resp, err
+	if unmarshalInto != nil {
+		unmarshaler := s.Unmarshaler
+		if unmarshaler == nil {
+			unmarshaler = DefaultUnmarshaler
 		}
+
+		err = unmarshaler.Unmarshal(body, resp.Header.Get("Content-Type"), unmarshalInto)
 	}
-	return resp, nil
+	return
 }

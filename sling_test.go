@@ -11,6 +11,9 @@ import (
 	"bytes"
 	"io"
 	"io/ioutil"
+	"net/http/httptest"
+	"errors"
+	"fmt"
 )
 
 type FakeParams struct {
@@ -39,326 +42,6 @@ func TestNew(t *testing.T) {
 	b, err := New()
 	require.NoError(t, err)
 	require.NotNil(t, b)
-}
-
-func TestURLString(t *testing.T) {
-	cases := []string{"http://a.io/", "http://b.io", "/relPath", "relPath", ""}
-	for _, base := range cases {
-		t.Run("", func(t *testing.T) {
-			b, errFromNew := New(URLString(base))
-			u, err := url.Parse(base)
-			if err == nil {
-				require.Equal(t, u, b.URL)
-			} else {
-				require.EqualError(t, errFromNew, err.Error())
-			}
-		})
-	}
-
-	t.Run("errors", func(t *testing.T) {
-		b, err := New(URLString("cache_object:foo/bar"))
-		require.Error(t, err)
-		require.Nil(t, b)
-	})
-}
-
-func TestRelativeURLString(t *testing.T) {
-	cases := []struct {
-		base     string
-		relPath  string
-		expected string
-	}{
-		{"http://a.io/", "foo", "http://a.io/foo"},
-		{"http://a.io/", "/foo", "http://a.io/foo"},
-		{"http://a.io", "foo", "http://a.io/foo"},
-		{"http://a.io", "/foo", "http://a.io/foo"},
-		{"http://a.io/foo/", "bar", "http://a.io/foo/bar"},
-		// base should end in trailing slash if it is to be URLString extended
-		{"http://a.io/foo", "bar", "http://a.io/bar"},
-		{"http://a.io/foo", "/bar", "http://a.io/bar"},
-		// relPath extension is absolute
-		{"http://a.io", "http://b.io/", "http://b.io/"},
-		{"http://a.io/", "http://b.io/", "http://b.io/"},
-		{"http://a.io", "http://b.io", "http://b.io"},
-		{"http://a.io/", "http://b.io", "http://b.io"},
-		// empty base, empty relPath
-		{"", "http://b.io", "http://b.io"},
-		{"http://a.io", "", "http://a.io"},
-		{"", "", ""},
-		{"/red", "", "/red"},
-	}
-	for _, c := range cases {
-		t.Run("", func(t *testing.T) {
-			b, err := New()
-			require.NoError(t, err)
-			if c.base != "" {
-				err := b.Apply(URLString(c.base))
-				require.NoError(t, err)
-			}
-			err = b.Apply(RelativeURLString(c.relPath))
-			require.NoError(t, err)
-			require.Equal(t, c.expected, b.URL.String())
-		})
-	}
-
-	t.Run("errors", func(t *testing.T) {
-		b, err := New(URLString("http://test.com/red"))
-		require.NoError(t, err)
-		err = b.Apply(RelativeURLString("cache_object:foo/bar"))
-		require.Error(t, err)
-		require.Equal(t, "http://test.com/red", b.URL.String())
-	})
-}
-
-func TestURL(t *testing.T) {
-	cases := []string{
-		"http://test.com",
-		"",
-	}
-	for _, c := range cases {
-		t.Run("", func(t *testing.T) {
-			var u *url.URL
-			if c != "" {
-				var err error
-				u, err = url.Parse(c)
-				require.NoError(t, err)
-			}
-			b, err := New(URL(u))
-			require.NoError(t, err)
-			require.Equal(t, u, b.URL)
-		})
-	}
-}
-
-func TestRelativeURL(t *testing.T) {
-	cases := []struct {
-		base        string
-		relPath     string
-		expectedURL string
-	}{
-		{"http://a.io/", "foo", "http://a.io/foo"},
-		{"http://a.io/", "/foo", "http://a.io/foo"},
-		{"http://a.io", "foo", "http://a.io/foo"},
-		{"http://a.io", "/foo", "http://a.io/foo"},
-		{"http://a.io/foo/", "bar", "http://a.io/foo/bar"},
-		// base should end in trailing slash if it is to be URLString extended
-		{"http://a.io/foo", "bar", "http://a.io/bar"},
-		{"http://a.io/foo", "/bar", "http://a.io/bar"},
-		// relPath extension is absolute
-		{"http://a.io", "http://b.io/", "http://b.io/"},
-		{"http://a.io/", "http://b.io/", "http://b.io/"},
-		{"http://a.io", "http://b.io", "http://b.io"},
-		{"http://a.io/", "http://b.io", "http://b.io"},
-		// empty base, empty relPath
-		{"", "http://b.io", "http://b.io"},
-		{"http://a.io", "", "http://a.io"},
-		{"", "", ""},
-		{"/red", "", "/red"},
-	}
-	for _, c := range cases {
-		t.Run("", func(t *testing.T) {
-			var u *url.URL
-			if c.relPath != "" {
-				var err error
-				u, err = url.Parse(c.relPath)
-				require.NoError(t, err)
-			}
-			b, err := New()
-			require.NoError(t, err)
-			if c.base != "" {
-				err := b.Apply(URLString(c.base))
-				require.NoError(t, err)
-			}
-			err = b.Apply(RelativeURL(u))
-			require.NoError(t, err)
-			if c.expectedURL == "" {
-				require.Nil(t, b.URL)
-			} else {
-				require.Equal(t, c.expectedURL, b.URL.String())
-			}
-		})
-	}
-
-}
-
-func TestMethod(t *testing.T) {
-	cases := []struct {
-		options        []Option
-		expectedMethod string
-	}{
-		{[]Option{Method("red")}, "red"},
-		{[]Option{Head()}, "HEAD"},
-		{[]Option{Get()}, "GET"},
-		{[]Option{Post()}, "POST"},
-		{[]Option{Put()}, "PUT"},
-		{[]Option{Patch()}, "PATCH"},
-		{[]Option{Delete()}, "DELETE"},
-	}
-	for _, c := range cases {
-		t.Run("", func(t *testing.T) {
-			b, err := New(c.options...)
-			require.NoError(t, err)
-			require.Equal(t, c.expectedMethod, b.Method)
-		})
-	}
-}
-
-func TestHeader(t *testing.T) {
-	cases := []http.Header{
-		{"red": []string{"green"}},
-		nil,
-	}
-	for _, c := range cases {
-		b, err := New(Header(c))
-		require.NoError(t, err)
-		require.Equal(t, c, b.Header)
-	}
-}
-
-func TestAddHeader(t *testing.T) {
-	cases := []struct {
-		options        []Option
-		expectedHeader http.Header
-	}{
-		{[]Option{AddHeader("authorization", "OAuth key=\"value\"")}, http.Header{"Authorization": {"OAuth key=\"value\""}}},
-		// header keys should be canonicalized
-		{[]Option{AddHeader("content-tYPE", "application/json"), AddHeader("User-AGENT", "sling")}, http.Header{"Content-Type": {"application/json"}, "User-Agent": {"sling"}}},
-		// values for existing keys should be appended
-		{[]Option{AddHeader("A", "B"), AddHeader("a", "c")}, http.Header{"A": {"B", "c"}}},
-	}
-	for _, c := range cases {
-		t.Run("", func(t *testing.T) {
-			b, err := New(c.options...)
-			require.NoError(t, err)
-			require.Equal(t, c.expectedHeader, b.Header)
-		})
-	}
-}
-
-func TestSetHeader(t *testing.T) {
-	cases := []struct {
-		options        []Option
-		expectedHeader http.Header
-	}{
-		// should replace existing values associated with key
-		{[]Option{AddHeader("A", "B"), SetHeader("a", "c")}, http.Header{"A": []string{"c"}}},
-		{[]Option{SetHeader("content-type", "A"), SetHeader("Content-Type", "B")}, http.Header{"Content-Type": []string{"B"}}},
-	}
-	for _, c := range cases {
-		t.Run("", func(t *testing.T) {
-			b, err := New(c.options...)
-			require.NoError(t, err)
-			// type conversion from Header to alias'd map for deep equality comparison
-			require.Equal(t, c.expectedHeader, b.Header)
-		})
-	}
-}
-
-func TestBasicAuth(t *testing.T) {
-	cases := []struct {
-		options      []Option
-		expectedAuth []string
-	}{
-		// basic auth: username & password
-		{[]Option{BasicAuth("Aladdin", "open sesame")}, []string{"Aladdin", "open sesame"}},
-		// empty username
-		{[]Option{BasicAuth("", "secret")}, []string{"", "secret"}},
-		// empty password
-		{[]Option{BasicAuth("admin", "")}, []string{"admin", ""}},
-	}
-	for _, c := range cases {
-		t.Run("", func(t *testing.T) {
-			b, err := New(c.options...)
-			require.NoError(t, err)
-			req, err := b.Request(context.Background())
-			require.NoError(t, err)
-			username, password, ok := req.BasicAuth()
-			require.True(t, ok, "basic auth missing when expected")
-			auth := []string{username, password}
-			require.Equal(t, c.expectedAuth, auth)
-		})
-	}
-}
-
-func TestBearerAuth(t *testing.T) {
-	cases := []string{
-		"red",
-		"",
-	}
-	for _, c := range cases {
-		t.Run("", func(t *testing.T) {
-			b, err := New(BearerAuth(c))
-			require.NoError(t, err)
-			if c == "" {
-				require.Empty(t, b.Header.Get("Authorization"))
-			} else {
-				require.Equal(t, "Bearer "+c, b.Header.Get("Authorization"))
-			}
-		})
-	}
-
-	t.Run("clearing", func(t *testing.T) {
-		b, err := New(BearerAuth("green"))
-		require.NoError(t, err)
-		err = b.Apply(BearerAuth(""))
-		require.NoError(t, err)
-		_, ok := b.Header["Authorization"]
-		require.False(t, ok, "should have removed Authorization header, instead was %s", b.Header.Get("Authorization"))
-	})
-}
-
-func TestQueryParams(t *testing.T) {
-	cases := []struct {
-		options        []Option
-		expectedParams url.Values
-	}{
-		{nil, nil},
-		{[]Option{QueryParams(nil)}, url.Values{}},
-		{[]Option{QueryParams(paramsA)}, url.Values{"limit": []string{"30"}}},
-		{[]Option{QueryParams(paramsA), QueryParams(paramsA)}, url.Values{"limit": []string{"30", "30"}}},
-		{[]Option{QueryParams(paramsA), QueryParams(paramsB)}, url.Values{"limit": []string{"30"}, "kind_name": []string{"recent"}, "count": []string{"25"}}},
-		{[]Option{QueryParams(paramsA, paramsB)}, url.Values{"limit": []string{"30"}, "kind_name": []string{"recent"}, "count": []string{"25"}}},
-		{[]Option{QueryParams(url.Values{"red": []string{"green"}})}, url.Values{"red": []string{"green"}}},
-		{[]Option{QueryParams(map[string][]string{"red": []string{"green"}})}, url.Values{"red": []string{"green"}}},
-	}
-
-	for _, c := range cases {
-		t.Run("", func(t *testing.T) {
-			b, err := New(c.options...)
-			require.NoError(t, err)
-			require.Equal(t, c.expectedParams, b.QueryParams)
-		})
-	}
-}
-
-func TestBody(t *testing.T) {
-	b, err := New(Body("hey"))
-	require.NoError(t, err)
-	require.Equal(t, "hey", b.Body)
-}
-
-type testMarshaler struct{}
-
-func (*testMarshaler) Unmarshal(data []byte, contentType string, v interface{}) error {
-	panic("implement me")
-}
-
-func (*testMarshaler) Marshal(v interface{}) (data []byte, contentType string, err error) {
-	panic("implement me")
-}
-
-func TestWithMarshaler(t *testing.T) {
-	m := &testMarshaler{}
-	b, err := New(WithMarshaler(m))
-	require.NoError(t, err)
-	require.Equal(t, m, b.Marshaler)
-}
-
-func TestWithUnmarshaler(t *testing.T) {
-	m := &testMarshaler{}
-	b, err := New(WithUnmarshaler(m))
-	require.NoError(t, err)
-	require.Equal(t, m, b.Unmarshaler)
 }
 
 func TestBuilder_Clone(t *testing.T) {
@@ -441,7 +124,7 @@ func TestBuilder_Apply(t *testing.T) {
 	})
 }
 
-func TestBuilder_Request_urlAndMethod(t *testing.T) {
+func TestBuilder_Request_URLAndMethod(t *testing.T) {
 	cases := []struct {
 		options        []Option
 		expectedMethod string
@@ -488,9 +171,9 @@ func TestBuilder_Request_urlAndMethod(t *testing.T) {
 
 }
 
-func TestBuilder_Request_queryStructs(t *testing.T) {
+func TestBuilder_Request_QueryStructs(t *testing.T) {
 	cases := []struct {
-		options []Option
+		options     []Option
 		expectedURL string
 	}{
 		{[]Option{URLString("http://a.io"), QueryParams(paramsA)}, "http://a.io?limit=30"},
@@ -508,9 +191,9 @@ func TestBuilder_Request_queryStructs(t *testing.T) {
 	}
 }
 
-func TestBuilder_Request_body(t *testing.T) {
+func TestBuilder_Request_Body(t *testing.T) {
 	cases := []struct {
-		options []Option
+		options             []Option
 		expectedBody        string // expected Body io.Reader as a string
 		expectedContentType string
 	}{
@@ -551,7 +234,35 @@ func TestBuilder_Request_body(t *testing.T) {
 	}
 }
 
-func TestBuilder_Request_contentLength(t *testing.T) {
+func TestBuilder_Request_Marshaler(t *testing.T) {
+	var capturedV interface{}
+	b := Builder{
+		Body: []string{"blue"},
+		Marshaler: MarshalFunc(func(v interface{}) ([]byte, string, error) {
+			capturedV = v
+			return []byte("red"), "orange", nil
+		}),
+	}
+
+	req, err := b.Request(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"blue"}, capturedV)
+	by, err := ioutil.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.Equal(t, "red", string(by))
+	require.Equal(t, "orange", req.Header.Get("Content-Type"))
+
+	t.Run("errors", func(t *testing.T) {
+		b.Marshaler = MarshalFunc(func(v interface{}) ([]byte, string, error) {
+			return nil, "", errors.New("boom")
+		})
+		_, err := b.Request(context.Background())
+		require.Error(t, err, "boom")
+	})
+}
+
+func TestBuilder_Request_ContentLength(t *testing.T) {
 	b, err := New(Body("1234"))
 	require.NoError(t, err)
 	req, err := b.Request(context.Background())
@@ -566,7 +277,7 @@ func TestBuilder_Request_contentLength(t *testing.T) {
 	require.EqualValues(t, 10, req.ContentLength)
 }
 
-func TestBuilder_Request_getBody(t *testing.T) {
+func TestBuilder_Request_GetBody(t *testing.T) {
 	b, err := New(Body("1234"))
 	require.NoError(t, err)
 	req, err := b.Request(context.Background())
@@ -645,7 +356,7 @@ func TestBuilder_Request_Trailer(t *testing.T) {
 	require.Nil(t, req.Trailer)
 
 	// but I can set it
-	b.Trailer = http.Header{"color":[]string{"red"}}
+	b.Trailer = http.Header{"color": []string{"red"}}
 	req, err = b.Request(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, b.Trailer, req.Trailer)
@@ -660,7 +371,7 @@ func TestBuilder_Request_Header(t *testing.T) {
 	require.Empty(t, req.Header)
 
 	// but I can set it
-	b.Header = http.Header{"color":[]string{"red"}}
+	b.Header = http.Header{"color": []string{"red"}}
 	req, err = b.Request(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, b.Header, req.Header)
@@ -674,299 +385,142 @@ func TestBuilder_Request_Context(t *testing.T) {
 	require.Equal(t, "red", req.Context().Value("color"))
 }
 
-func TestBuilder_Request_JSONMarshaler(t *testing.T) {
-	cases := []struct {
-		options             []Option
-		expectedBody        string // expected Body io.Reader as a string
-		expectedContentType string
-	}{
-		// Body (json)
-		{[]Option{Body(modelA)}, `{"text":"note","favorite_count":12}`, jsonContentType},
-		{[]Option{Body(&modelA)}, `{"text":"note","favorite_count":12}`, jsonContentType},
-		{[]Option{Body(&FakeModel{})}, `{}`, jsonContentType},
-		{[]Option{Body(FakeModel{})}, `{}`, jsonContentType},
-		// BodyForm
-		//{[]Option{Body(paramsA)}, "limit=30", formContentType},
-		//{[]Option{Body(paramsB)}, "count=25&kind_name=recent", formContentType},
-		//{[]Option{Body(&paramsB)}, "count=25&kind_name=recent", formContentType},
-		// Raw bodies, skips marshaler
-		{[]Option{Body(strings.NewReader("this-is-a-test"))}, "this-is-a-test", ""},
-		{[]Option{Body("this-is-a-test")}, "this-is-a-test", ""},
-		{[]Option{Body([]byte("this-is-a-test"))}, "this-is-a-test", ""},
-		// no body
-		{nil, "", ""},
+func TestBuilder_Do(t *testing.T) {
+	cl, mux, srv := testServer()
+	defer srv.Close()
+
+	b, err := New(
+		URLString("http://blue.com/server"),
+		AddHeader("color", "red"),
+	)
+	require.NoError(t, err)
+	b.Doer = cl
+
+	var req *http.Request
+
+	// Do() just creates a request and sends it to the Doer.  That's all we're confirming here
+	mux.Handle("/server", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req = r
+		w.WriteHeader(204)
+	}))
+
+	resp, err := b.Do(context.Background())
+	require.NoError(t, err)
+
+	// confirm the request went through
+	require.NotNil(t, req)
+	assert.Equal(t, "red", req.Header.Get("color"))
+	assert.Equal(t, 204, resp.StatusCode)
+}
+
+func TestBuilder_Receive(t *testing.T) {
+	cl, mux, srv := testServer()
+	defer srv.Close()
+
+	succBuilder, err := New(
+		URLString("http://blue.com/model.json"),
+	)
+	require.NoError(t, err)
+	succBuilder.Doer = cl
+
+	failBuilder, err := succBuilder.With(RelativeURLString("/err"))
+	require.NoError(t, err)
+
+	mux.HandleFunc("/model.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(206)
+		w.Write([]byte(`{"color":"red","count":30}`))
+	})
+
+	mux.HandleFunc("/err", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(500)
+		w.Write([]byte(`{"color":"red","count":30}`))
+	})
+
+	cases := []struct{
+		succ, fail bool
+	} {
+		{true, true},
+		{true, false},
+		{false, true},
+		{false, false},
+	}
+
+	for _, c := range cases {
+		t.Run(fmt.Sprintf("succ=%v,fail=%v", c.succ, c.fail), func(t *testing.T) {
+
+			var succ, fail testModel
+			doCall := func(b *Builder) (*http.Response, []byte, error){
+				switch {
+				case c.succ && c.fail:
+					return b.Receive(context.Background(), &succ, &fail)
+				case !c.succ && !c.fail:
+					return b.Receive(context.Background(), nil, nil)
+				case c.succ:
+					return b.Receive(context.Background(), &succ, nil)
+				default:
+					return b.Receive(context.Background(), nil, &fail)
+				}
+			}
+
+			resp, body, err := doCall(succBuilder)
+			require.NoError(t, err)
+			assert.Equal(t, 206, resp.StatusCode)
+			assert.Equal(t, `{"color":"red","count":30}`, string(body))
+			if c.succ {
+				assert.Equal(t, testModel{"red", 30}, succ)
+			}
+
+			resp, body, err = doCall(failBuilder)
+			assert.Equal(t, 500, resp.StatusCode)
+			assert.Equal(t, `{"color":"red","count":30}`, string(body))
+			if c.fail {
+				assert.Equal(t, testModel{"red", 30}, fail)
+			}
+		})
 	}
 }
 
-//// Sending
-//
-//type APIError struct {
-//	Message string `json:"message"`
-//	Code    int    `json:"code"`
-//}
-//
-//func TestDo_onSuccess(t *testing.T) {
-//	const expectedText = "Some text"
-//	const expectedFavoriteCount int64 = 24
-//
-//	client, mux, server := testServer()
-//	defer server.Close()
-//	mux.HandleFunc("/success", func(w http.ResponseWriter, r *http.Request) {
-//		w.Header().Set("Content-Type", "application/json")
-//		fmt.Fprintf(w, `{"text": "Some text", "favorite_count": 24}`)
-//	})
-//
-//	sling := New().Client(client)
-//	req, _ := http.NewRequest("GET", "http://example.com/success", nil)
-//
-//	model := new(FakeModel)
-//	apiError := new(APIError)
-//	resp, err := sling.Do(req, model, apiError)
-//
-//	if err != nil {
-//		t.Errorf("expected nil, got %v", err)
-//	}
-//	if resp.StatusCode != 200 {
-//		t.Errorf("expected %d, got %d", 200, resp.StatusCode)
-//	}
-//	if model.Text != expectedText {
-//		t.Errorf("expected %s, got %s", expectedText, model.Text)
-//	}
-//	if model.FavoriteCount != expectedFavoriteCount {
-//		t.Errorf("expected %d, got %d", expectedFavoriteCount, model.FavoriteCount)
-//	}
-//}
-//
-//func TestDo_onSuccessWithNilValue(t *testing.T) {
-//	client, mux, server := testServer()
-//	defer server.Close()
-//	mux.HandleFunc("/success", func(w http.ResponseWriter, r *http.Request) {
-//		w.Header().Set("Content-Type", "application/json")
-//		fmt.Fprintf(w, `{"text": "Some text", "favorite_count": 24}`)
-//	})
-//
-//	sling := New().Client(client)
-//	req, _ := http.NewRequest("GET", "http://example.com/success", nil)
-//
-//	apiError := new(APIError)
-//	resp, err := sling.Do(req, nil, apiError)
-//
-//	if err != nil {
-//		t.Errorf("expected nil, got %v", err)
-//	}
-//	if resp.StatusCode != 200 {
-//		t.Errorf("expected %d, got %d", 200, resp.StatusCode)
-//	}
-//	expected := &APIError{}
-//	if !reflect.DeepEqual(expected, apiError) {
-//		t.Errorf("failureV should not be populated, exepcted %v, got %v", expected, apiError)
-//	}
-//}
-//
-//func TestDo_onFailure(t *testing.T) {
-//	const expectedMessage = "Invalid argument"
-//	const expectedCode int = 215
-//
-//	client, mux, server := testServer()
-//	defer server.Close()
-//	mux.HandleFunc("/failure", func(w http.ResponseWriter, r *http.Request) {
-//		w.Header().Set("Content-Type", "application/json")
-//		w.WriteHeader(400)
-//		fmt.Fprintf(w, `{"message": "Invalid argument", "code": 215}`)
-//	})
-//
-//	sling := New().Client(client)
-//	req, _ := http.NewRequest("GET", "http://example.com/failure", nil)
-//
-//	model := new(FakeModel)
-//	apiError := new(APIError)
-//	resp, err := sling.Do(req, model, apiError)
-//
-//	if err != nil {
-//		t.Errorf("expected nil, got %v", err)
-//	}
-//	if resp.StatusCode != 400 {
-//		t.Errorf("expected %d, got %d", 400, resp.StatusCode)
-//	}
-//	if apiError.Message != expectedMessage {
-//		t.Errorf("expected %s, got %s", expectedMessage, apiError.Message)
-//	}
-//	if apiError.Code != expectedCode {
-//		t.Errorf("expected %d, got %d", expectedCode, apiError.Code)
-//	}
-//}
-//
-//func TestDo_onFailureWithNilValue(t *testing.T) {
-//	client, mux, server := testServer()
-//	defer server.Close()
-//	mux.HandleFunc("/failure", func(w http.ResponseWriter, r *http.Request) {
-//		w.Header().Set("Content-Type", "application/json")
-//		w.WriteHeader(420)
-//		fmt.Fprintf(w, `{"message": "Enhance your calm", "code": 88}`)
-//	})
-//
-//	sling := New().Client(client)
-//	req, _ := http.NewRequest("GET", "http://example.com/failure", nil)
-//
-//	model := new(FakeModel)
-//	resp, err := sling.Do(req, model, nil)
-//
-//	if err != nil {
-//		t.Errorf("expected nil, got %v", err)
-//	}
-//	if resp.StatusCode != 420 {
-//		t.Errorf("expected %d, got %d", 420, resp.StatusCode)
-//	}
-//	expected := &FakeModel{}
-//	if !reflect.DeepEqual(expected, model) {
-//		t.Errorf("successV should not be populated, exepcted %v, got %v", expected, model)
-//	}
-//}
-//
-//func TestDo_skipDecodingIfContentTypeWrong(t *testing.T) {
-//	client, mux, server := testServer()
-//	defer server.Close()
-//	mux.HandleFunc("/success", func(w http.ResponseWriter, r *http.Request) {
-//		w.Header().Set("Content-Type", "text/html")
-//		fmt.Fprintf(w, `{"text": "Some text", "favorite_count": 24}`)
-//	})
-//
-//	sling := New().Client(client)
-//	req, _ := http.NewRequest("GET", "http://example.com/success", nil)
-//
-//	model := new(FakeModel)
-//	sling.Do(req, model, nil)
-//
-//	expectedModel := &FakeModel{}
-//	if !reflect.DeepEqual(expectedModel, model) {
-//		t.Errorf("decoding should have been skipped, Content-Type was incorrect")
-//	}
-//}
-//
-//func TestReceive_success(t *testing.T) {
-//	client, mux, server := testServer()
-//	defer server.Close()
-//	mux.HandleFunc("/foo/submit", func(w http.ResponseWriter, r *http.Request) {
-//		assertMethod(t, "POST", r)
-//		assertQuery(t, map[string]string{"kind_name": "vanilla", "count": "11"}, r)
-//		assertPostForm(t, map[string]string{"kind_name": "vanilla", "count": "11"}, r)
-//		w.Header().Set("Content-Type", "application/json")
-//		fmt.Fprintf(w, `{"text": "Some text", "favorite_count": 24}`)
-//	})
-//
-//	endpoint := New().Client(client).Base("http://example.com/").Path("foo/").Post("submit")
-//	// encode url-tagged struct in query params and as post body for testing purposes
-//	params := FakeParams{KindName: "vanilla", Count: 11}
-//	model := new(FakeModel)
-//	apiError := new(APIError)
-//	resp, err := endpoint.New().QueryStruct(params).BodyForm(params).Receive(model, apiError)
-//
-//	if err != nil {
-//		t.Errorf("expected nil, got %v", err)
-//	}
-//	if resp.StatusCode != 200 {
-//		t.Errorf("expected %d, got %d", 200, resp.StatusCode)
-//	}
-//	expectedModel := &FakeModel{Text: "Some text", FavoriteCount: 24}
-//	if !reflect.DeepEqual(expectedModel, model) {
-//		t.Errorf("expected %v, got %v", expectedModel, model)
-//	}
-//	expectedAPIError := &APIError{}
-//	if !reflect.DeepEqual(expectedAPIError, apiError) {
-//		t.Errorf("failureV should be zero valued, exepcted %v, got %v", expectedAPIError, apiError)
-//	}
-//}
-//
-//func TestReceive_failure(t *testing.T) {
-//	client, mux, server := testServer()
-//	defer server.Close()
-//	mux.HandleFunc("/foo/submit", func(w http.ResponseWriter, r *http.Request) {
-//		assertMethod(t, "POST", r)
-//		assertQuery(t, map[string]string{"kind_name": "vanilla", "count": "11"}, r)
-//		assertPostForm(t, map[string]string{"kind_name": "vanilla", "count": "11"}, r)
-//		w.Header().Set("Content-Type", "application/json")
-//		w.WriteHeader(429)
-//		fmt.Fprintf(w, `{"message": "Rate limit exceeded", "code": 88}`)
-//	})
-//
-//	endpoint := New().Client(client).Base("http://example.com/").Path("foo/").Post("submit")
-//	// encode url-tagged struct in query params and as post body for testing purposes
-//	params := FakeParams{KindName: "vanilla", Count: 11}
-//	model := new(FakeModel)
-//	apiError := new(APIError)
-//	resp, err := endpoint.New().QueryStruct(params).BodyForm(params).Receive(model, apiError)
-//
-//	if err != nil {
-//		t.Errorf("expected nil, got %v", err)
-//	}
-//	if resp.StatusCode != 429 {
-//		t.Errorf("expected %d, got %d", 429, resp.StatusCode)
-//	}
-//	expectedAPIError := &APIError{Message: "Rate limit exceeded", Code: 88}
-//	if !reflect.DeepEqual(expectedAPIError, apiError) {
-//		t.Errorf("expected %v, got %v", expectedAPIError, apiError)
-//	}
-//	expectedModel := &FakeModel{}
-//	if !reflect.DeepEqual(expectedModel, model) {
-//		t.Errorf("successV should not be zero valued, expected %v, got %v", expectedModel, model)
-//	}
-//}
-//
-//func TestReceive_errorCreatingRequest(t *testing.T) {
-//	expectedErr := errors.New("json: unsupported value: +Inf")
-//	resp, err := New().BodyJSON(FakeModel{Temperature: math.Inf(1)}).Receive(nil, nil)
-//	if err == nil || err.Error() != expectedErr.Error() {
-//		t.Errorf("expected %v, got %v", expectedErr, err)
-//	}
-//	if resp != nil {
-//		t.Errorf("expected nil resp, got %v", resp)
-//	}
-//}
-//
-//// Testing Utils
-//
-//// testServer returns an http Client, ServeMux, and Server. The client proxies
-//// requests to the server and handlers can be registered on the mux to handle
-//// requests. The caller must close the test server.
-//func testServer() (*http.Client, *http.ServeMux, *httptest.Server) {
-//	mux := http.NewServeMux()
-//	server := httptest.NewServer(mux)
-//	transport := &http.Transport{
-//		Proxy: func(req *http.Request) (*url.URL, error) {
-//			return url.Parse(server.URL)
-//		},
-//	}
-//	client := &http.Client{Transport: transport}
-//	return client, mux, server
-//}
-//
-//func assertMethod(t *testing.T, expectedMethod string, req *http.Request) {
-//	if actualMethod := req.Method; actualMethod != expectedMethod {
-//		t.Errorf("expected method %s, got %s", expectedMethod, actualMethod)
-//	}
-//}
-//
-//// assertQuery tests that the Request has the expected url query key/val pairs
-//func assertQuery(t *testing.T, expected map[string]string, req *http.Request) {
-//	queryValues := req.URL.Query() // net/url Values is a map[string][]string
-//	expectedValues := url.Values{}
-//	for key, value := range expected {
-//		expectedValues.Add(key, value)
-//	}
-//	if !reflect.DeepEqual(expectedValues, queryValues) {
-//		t.Errorf("expected parameters %v, got %v", expected, req.URL.RawQuery)
-//	}
-//}
-//
-//// assertPostForm tests that the Request has the expected key values pairs url
-//// encoded in its Body
-//func assertPostForm(t *testing.T, expected map[string]string, req *http.Request) {
-//	req.ParseForm() // parses request Body to put url.Values in r.Form/r.PostForm
-//	expectedValues := url.Values{}
-//	for key, value := range expected {
-//		expectedValues.Add(key, value)
-//	}
-//	if !reflect.DeepEqual(expectedValues, req.PostForm) {
-//		t.Errorf("expected parameters %v, got %v", expected, req.PostForm)
-//	}
-//}
+func TestBuilder_ReceiveSuccess(t *testing.T) {
+	cl, mux, srv := testServer()
+	defer srv.Close()
+
+	b, err := New(
+		URLString("http://blue.com/model.json"),
+	)
+	require.NoError(t, err)
+	b.Doer = cl
+
+	mux.HandleFunc("/model.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(206)
+		w.Write([]byte(`{"color":"red","count":30}`))
+	})
+
+	// this is just a special case of Receive(v, nil)
+	var m testModel
+	resp, body, err := b.ReceiveSuccess(context.Background(), &m)
+	require.NoError(t, err)
+	assert.Equal(t, 206, resp.StatusCode)
+	assert.Equal(t, `{"color":"red","count":30}`, string(body))
+	assert.Equal(t, testModel{"red", 30}, m)
+
+}
+
+// Testing Utils
+
+// testServer returns an http Client, ServeMux, and Server. The client proxies
+// requests to the server and handlers can be registered on the mux to handle
+// requests. The caller must close the test server.
+func testServer() (*http.Client, *http.ServeMux, *httptest.Server) {
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	transport := &http.Transport{
+		Proxy: func(req *http.Request) (*url.URL, error) {
+			return url.Parse(server.URL)
+		},
+	}
+	client := &http.Client{Transport: transport}
+	return client, mux, server
+}

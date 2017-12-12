@@ -8,6 +8,9 @@ import (
 	goquery "github.com/google/go-querystring/query"
 )
 
+var DefaultMarshaler Marshaler = &JSONMarshaler{}
+var DefaultUnmarshaler Unmarshaler = &MultiUnmarshaler{}
+
 type Marshaler interface {
 	Marshal(v interface{}) (data []byte, contentType string, err error)
 }

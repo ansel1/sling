@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"github.com/ansel1/merry"
 	goquery "github.com/google/go-querystring/query"
+	"encoding/base64"
 )
 
 type Option interface {
@@ -109,6 +110,13 @@ func DeleteHeader(key string) Option {
 
 func BasicAuth(username, password string) Option {
 	return SetHeader("Authorization", "Basic " + basicAuth(username, password))
+}
+
+// basicAuth returns the base64 encoded username:password for basic auth copied
+// from net/http.
+func basicAuth(username, password string) string {
+	auth := username + ":" + password
+	return base64.StdEncoding.EncodeToString([]byte(auth))
 }
 
 func BearerAuth(token string) Option {
