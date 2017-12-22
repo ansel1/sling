@@ -1,10 +1,10 @@
 package sling
 
 import (
-	"testing"
-	"github.com/stretchr/testify/require"
 	"encoding/json"
 	"github.com/magiconair/properties/assert"
+	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestJSONMarshaler_Marshal(t *testing.T) {
@@ -37,12 +37,12 @@ func TestJSONMarshaler_Unmarshal(t *testing.T) {
 	err := m.Unmarshal(d, "", &v)
 	require.NoError(t, err)
 
-	require.Equal(t, map[string]interface{}{"color":"red"}, v)
+	require.Equal(t, map[string]interface{}{"color": "red"}, v)
 }
 
 type testModel struct {
 	Color string `xml:"color" json:"color" url:"color"`
-	Count int `xml:"count" json:"count" url:"count"`
+	Count int    `xml:"count" json:"count" url:"count"`
 }
 
 func TestXMLMarshaler_Marshal(t *testing.T) {
@@ -79,17 +79,17 @@ func TestXMLMarshaler_Unmarshal(t *testing.T) {
 func TestMultiUnmarshaler_Unmarshal(t *testing.T) {
 	m := MultiUnmarshaler{}
 
-	cases := []struct{
-		input string
+	cases := []struct {
+		input       string
 		contentType string
 	}{
 		{
-			input: `<testModel><color>red</color><count>30</count></testModel>`,
+			input:       `<testModel><color>red</color><count>30</count></testModel>`,
 			contentType: `application/xml`,
 		},
 		{
-			input: `{"color":"red","count":30}`,
-			contentType:`application/json`,
+			input:       `{"color":"red","count":30}`,
+			contentType: `application/json`,
 		},
 	}
 	for _, c := range cases {

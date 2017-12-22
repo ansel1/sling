@@ -1,35 +1,44 @@
 package sling
 
 import (
-	"net/http"
-	"net/url"
+	"encoding/base64"
 	"github.com/ansel1/merry"
 	goquery "github.com/google/go-querystring/query"
-	"encoding/base64"
+	"net/http"
+	"net/url"
+)
+
+const (
+	HEADER_ACCEPT       = "Accept"
+	HEADER_CONTENT_TYPE = "Content-Type"
+
+	CONTENT_TYPE_JSON = "application/json"
+	CONTENT_TYPE_XML  = "application/xml"
+	CONTENT_TYPE_FORM = "application/x-www-form-urlencoded"
 )
 
 type Option interface {
-	Apply(b *Builder) error
+	Apply(*Requests) error
 }
 
-type OptionFunc func(*Builder) error
+type OptionFunc func(*Requests) error
 
-func (f OptionFunc) Apply(b *Builder) error {
-	return f(b)
+func (f OptionFunc) Apply(r *Requests) error {
+	return f(r)
 }
 
-func (s *Builder) With(opts ...Option) (*Builder, error) {
-	s2 := s.Clone()
-	err := s2.Apply(opts...)
+func (r *Requests) With(opts ...Option) (*Requests, error) {
+	r2 := r.Clone()
+	err := r2.Apply(opts...)
 	if err != nil {
 		return nil, err
 	}
-	return s2, nil
+	return r2, nil
 }
 
-func (s *Builder) Apply(opts ...Option) error {
+func (r *Requests) Apply(opts ...Option) error {
 	for _, o := range opts {
-		err := o.Apply(s)
+		err := o.Apply(r)
 		if err != nil {
 			return merry.Prepend(err, "applying options")
 		}
@@ -38,10 +47,10 @@ func (s *Builder) Apply(opts ...Option) error {
 }
 
 func Method(m string, paths ...string) Option {
-	return OptionFunc(func(b *Builder) error {
-		b.Method = m
+	return OptionFunc(func(r *Requests) error {
+		r.Method = m
 		for _, p := range paths {
-			err := RelativeURLString(p).Apply(b)
+			err := RelativeURL(p).Apply(r)
 			if err != nil {
 				return err
 			}
@@ -74,15 +83,8 @@ func Delete(paths ...string) Option {
 	return Method("DELETE", paths...)
 }
 
-func Header(h http.Header) Option {
-	return OptionFunc(func(b *Builder) error {
-		b.Header = h
-		return nil
-	})
-}
-
 func AddHeader(key, value string) Option {
-	return OptionFunc(func(b *Builder) error {
+	return OptionFunc(func(b *Requests) error {
 		if b.Header == nil {
 			b.Header = make(http.Header)
 		}
@@ -91,8 +93,8 @@ func AddHeader(key, value string) Option {
 	})
 }
 
-func SetHeader(key, value string) Option {
-	return OptionFunc(func(b *Builder) error {
+func Header(key, value string) Option {
+	return OptionFunc(func(b *Requests) error {
 		if b.Header == nil {
 			b.Header = make(http.Header)
 		}
@@ -102,14 +104,14 @@ func SetHeader(key, value string) Option {
 }
 
 func DeleteHeader(key string) Option {
-	return OptionFunc(func(b *Builder) error {
+	return OptionFunc(func(b *Requests) error {
 		b.Header.Del(key)
 		return nil
 	})
 }
 
 func BasicAuth(username, password string) Option {
-	return SetHeader("Authorization", "Basic " + basicAuth(username, password))
+	return Header("Authorization", "Basic "+basicAuth(username, password))
 }
 
 // basicAuth returns the base64 encoded username:password for basic auth copied
@@ -123,31 +125,11 @@ func BearerAuth(token string) Option {
 	if token == "" {
 		return DeleteHeader("Authorization")
 	}
-	return SetHeader("Authorization", "Bearer " + token)
+	return Header("Authorization", "Bearer "+token)
 }
 
-func URL(u *url.URL) Option {
-	return OptionFunc(func(b *Builder) error {
-		b.URL = u
-		return nil
-	})
-}
-
-func RelativeURL(u *url.URL) Option {
-	return OptionFunc(func(b *Builder) error {
-		switch {
-		case b.URL == nil:
-			b.URL = u
-		case u == nil:
-		default:
-			b.URL = b.URL.ResolveReference(u)
-		}
-		return nil
-	})
-}
-
-func URLString(p string) Option {
-	return OptionFunc(func(b *Builder) error {
+func URL(p string) Option {
+	return OptionFunc(func(b *Requests) error {
 		u, err := url.Parse(p)
 		if err != nil {
 			return merry.Prepend(err, "invalid url")
@@ -157,8 +139,8 @@ func URLString(p string) Option {
 	})
 }
 
-func RelativeURLString(p string) Option {
-	return OptionFunc(func(b *Builder) error {
+func RelativeURL(p string) Option {
+	return OptionFunc(func(b *Requests) error {
 		u, err := url.Parse(p)
 		if err != nil {
 			return merry.Prepend(err, "invalid url")
@@ -173,7 +155,7 @@ func RelativeURLString(p string) Option {
 }
 
 func QueryParams(queryStructs ...interface{}) Option {
-	return OptionFunc(func(s *Builder) error {
+	return OptionFunc(func(s *Requests) error {
 		if s.QueryParams == nil {
 			s.QueryParams = url.Values{}
 		}
@@ -190,7 +172,7 @@ func QueryParams(queryStructs ...interface{}) Option {
 				var err error
 				values, err = goquery.Values(queryStruct)
 				if err != nil {
-					return merry.Prepend(err,"invalid query struct")
+					return merry.Prepend(err, "invalid query struct")
 				}
 			}
 
@@ -206,34 +188,67 @@ func QueryParams(queryStructs ...interface{}) Option {
 }
 
 func Body(body interface{}) Option {
-	return OptionFunc(func(b *Builder) error {
+	return OptionFunc(func(b *Requests) error {
 		b.Body = body
 		return nil
 	})
 }
 
-func WithMarshaler(m Marshaler) Option {
-	return OptionFunc(func(b *Builder) error {
+func Marshaler(m BodyMarshaler) Option {
+	return OptionFunc(func(b *Requests) error {
 		b.Marshaler = m
 		return nil
 	})
 }
 
-func WithUnmarshaler(m Unmarshaler) Option {
-	return OptionFunc(func(b *Builder) error {
+func Unmarshaler(m BodyUnmarshaler) Option {
+	return OptionFunc(func(b *Requests) error {
 		b.Unmarshaler = m
 		return nil
 	})
 }
 
+func Accept(accept string) Option {
+	return Header("Accept", accept)
+}
+
+func ContentType(contentType string) Option {
+	return Header("Content-Type", contentType)
+}
+
+func Host(host string) Option {
+	return OptionFunc(func(b *Requests) error {
+		b.Host = host
+		return nil
+	})
+}
+
 func JSON(indent bool) Option {
-	return WithMarshaler(&JSONMarshaler{Indent:indent})
+	return Marshaler(&JSONMarshaler{Indent: indent})
 }
 
 func XML(indent bool) Option {
-	return WithMarshaler(&XMLMarshaler{Indent:indent})
+	return Marshaler(&XMLMarshaler{Indent: indent})
 }
 
 func Form() Option {
-	return WithMarshaler(&FormMarshaler{})
+	return Marshaler(&FormMarshaler{})
+}
+
+func Client(opts ...ClientOption) Option {
+	return OptionFunc(func(b *Requests) error {
+		c, err := NewClient(opts...)
+		if err != nil {
+			return err
+		}
+		b.Doer = c
+		return nil
+	})
+}
+
+func Use(m ...Middleware) Option {
+	return OptionFunc(func(r *Requests) error {
+		r.Middleware = append(r.Middleware, m...)
+		return nil
+	})
 }

@@ -1,19 +1,53 @@
 package sling
 
 import (
-	"testing"
-	"net/url"
-	"github.com/stretchr/testify/require"
-	"net/http"
 	"context"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"net/http"
+	"net/url"
+	"testing"
 )
+
+func TestRequests_With(t *testing.T) {
+	b, err := New(Method("red"))
+	require.NoError(t, err)
+	b2, err := b.With(Method("green"))
+	require.NoError(t, err)
+	// should clone first, then apply
+	require.Equal(t, "green", b2.Method)
+	require.Equal(t, "red", b.Method)
+
+	t.Run("errors", func(t *testing.T) {
+		b, err := New(Method("green"))
+		require.NoError(t, err)
+		b2, err := b.With(Method("red"), RelativeURL("cache_object:foo/bar"))
+		require.Error(t, err)
+		require.Nil(t, b2)
+		require.Equal(t, "green", b.Method)
+	})
+}
+
+func TestRequests_Apply(t *testing.T) {
+	b, err := New(Method("red"))
+	require.NoError(t, err)
+	err = b.Apply(Method("green"))
+	require.NoError(t, err)
+	// applies in place
+	require.Equal(t, "green", b.Method)
+
+	t.Run("errors", func(t *testing.T) {
+		err := b.Apply(URL("cache_object:foo/bar"))
+		require.Error(t, err)
+		require.Nil(t, b.URL)
+	})
+}
 
 func TestURLString(t *testing.T) {
 	cases := []string{"http://a.io/", "http://b.io", "/relPath", "relPath", ""}
 	for _, base := range cases {
 		t.Run("", func(t *testing.T) {
-			b, errFromNew := New(URLString(base))
+			b, errFromNew := New(URL(base))
 			u, err := url.Parse(base)
 			if err == nil {
 				require.Equal(t, u, b.URL)
@@ -24,7 +58,7 @@ func TestURLString(t *testing.T) {
 	}
 
 	t.Run("errors", func(t *testing.T) {
-		b, err := New(URLString("cache_object:foo/bar"))
+		b, err := New(URL("cache_object:foo/bar"))
 		require.Error(t, err)
 		require.Nil(t, b)
 	})
@@ -41,7 +75,7 @@ func TestRelativeURLString(t *testing.T) {
 		{"http://a.io", "foo", "http://a.io/foo"},
 		{"http://a.io", "/foo", "http://a.io/foo"},
 		{"http://a.io/foo/", "bar", "http://a.io/foo/bar"},
-		// base should end in trailing slash if it is to be URLString extended
+		// base should end in trailing slash if it is to be URL extended
 		{"http://a.io/foo", "bar", "http://a.io/bar"},
 		{"http://a.io/foo", "/bar", "http://a.io/bar"},
 		// relPath extension is absolute
@@ -60,93 +94,22 @@ func TestRelativeURLString(t *testing.T) {
 			b, err := New()
 			require.NoError(t, err)
 			if c.base != "" {
-				err := b.Apply(URLString(c.base))
+				err := b.Apply(URL(c.base))
 				require.NoError(t, err)
 			}
-			err = b.Apply(RelativeURLString(c.relPath))
+			err = b.Apply(RelativeURL(c.relPath))
 			require.NoError(t, err)
 			require.Equal(t, c.expected, b.URL.String())
 		})
 	}
 
 	t.Run("errors", func(t *testing.T) {
-		b, err := New(URLString("http://test.com/red"))
+		b, err := New(URL("http://test.com/red"))
 		require.NoError(t, err)
-		err = b.Apply(RelativeURLString("cache_object:foo/bar"))
+		err = b.Apply(RelativeURL("cache_object:foo/bar"))
 		require.Error(t, err)
 		require.Equal(t, "http://test.com/red", b.URL.String())
 	})
-}
-
-func TestURL(t *testing.T) {
-	cases := []string{
-		"http://test.com",
-		"",
-	}
-	for _, c := range cases {
-		t.Run("", func(t *testing.T) {
-			var u *url.URL
-			if c != "" {
-				var err error
-				u, err = url.Parse(c)
-				require.NoError(t, err)
-			}
-			b, err := New(URL(u))
-			require.NoError(t, err)
-			require.Equal(t, u, b.URL)
-		})
-	}
-}
-
-func TestRelativeURL(t *testing.T) {
-	cases := []struct {
-		base        string
-		relPath     string
-		expectedURL string
-	}{
-		{"http://a.io/", "foo", "http://a.io/foo"},
-		{"http://a.io/", "/foo", "http://a.io/foo"},
-		{"http://a.io", "foo", "http://a.io/foo"},
-		{"http://a.io", "/foo", "http://a.io/foo"},
-		{"http://a.io/foo/", "bar", "http://a.io/foo/bar"},
-		// base should end in trailing slash if it is to be URLString extended
-		{"http://a.io/foo", "bar", "http://a.io/bar"},
-		{"http://a.io/foo", "/bar", "http://a.io/bar"},
-		// relPath extension is absolute
-		{"http://a.io", "http://b.io/", "http://b.io/"},
-		{"http://a.io/", "http://b.io/", "http://b.io/"},
-		{"http://a.io", "http://b.io", "http://b.io"},
-		{"http://a.io/", "http://b.io", "http://b.io"},
-		// empty base, empty relPath
-		{"", "http://b.io", "http://b.io"},
-		{"http://a.io", "", "http://a.io"},
-		{"", "", ""},
-		{"/red", "", "/red"},
-	}
-	for _, c := range cases {
-		t.Run("", func(t *testing.T) {
-			var u *url.URL
-			if c.relPath != "" {
-				var err error
-				u, err = url.Parse(c.relPath)
-				require.NoError(t, err)
-			}
-			b, err := New()
-			require.NoError(t, err)
-			if c.base != "" {
-				err := b.Apply(URLString(c.base))
-				require.NoError(t, err)
-			}
-			err = b.Apply(RelativeURL(u))
-			require.NoError(t, err)
-			if c.expectedURL == "" {
-				require.Nil(t, b.URL)
-			} else {
-				require.Equal(t, c.expectedURL, b.URL.String())
-			}
-		})
-	}
-
 }
 
 func TestMethod(t *testing.T) {
@@ -171,18 +134,6 @@ func TestMethod(t *testing.T) {
 	}
 }
 
-func TestHeader(t *testing.T) {
-	cases := []http.Header{
-		{"red": []string{"green"}},
-		nil,
-	}
-	for _, c := range cases {
-		b, err := New(Header(c))
-		require.NoError(t, err)
-		require.Equal(t, c, b.Header)
-	}
-}
-
 func TestAddHeader(t *testing.T) {
 	cases := []struct {
 		options        []Option
@@ -203,14 +154,14 @@ func TestAddHeader(t *testing.T) {
 	}
 }
 
-func TestSetHeader(t *testing.T) {
+func TestHeader(t *testing.T) {
 	cases := []struct {
 		options        []Option
 		expectedHeader http.Header
 	}{
 		// should replace existing values associated with key
-		{[]Option{AddHeader("A", "B"), SetHeader("a", "c")}, http.Header{"A": []string{"c"}}},
-		{[]Option{SetHeader("content-type", "A"), SetHeader("Content-Type", "B")}, http.Header{"Content-Type": []string{"B"}}},
+		{[]Option{AddHeader("A", "B"), Header("a", "c")}, http.Header{"A": []string{"c"}}},
+		{[]Option{Header("content-type", "A"), Header("Content-Type", "B")}, http.Header{"Content-Type": []string{"B"}}},
 	}
 	for _, c := range cases {
 		t.Run("", func(t *testing.T) {
@@ -238,7 +189,7 @@ func TestBasicAuth(t *testing.T) {
 		t.Run("", func(t *testing.T) {
 			b, err := New(c.options...)
 			require.NoError(t, err)
-			req, err := b.Request(context.Background())
+			req, err := b.RequestContext(context.Background())
 			require.NoError(t, err)
 			username, password, ok := req.BasicAuth()
 			require.True(t, ok, "basic auth missing when expected")
@@ -315,16 +266,16 @@ func (*testMarshaler) Marshal(v interface{}) (data []byte, contentType string, e
 	panic("implement me")
 }
 
-func TestWithMarshaler(t *testing.T) {
+func TestMarshaler(t *testing.T) {
 	m := &testMarshaler{}
-	b, err := New(WithMarshaler(m))
+	b, err := New(Marshaler(m))
 	require.NoError(t, err)
 	require.Equal(t, m, b.Marshaler)
 }
 
-func TestWithUnmarshaler(t *testing.T) {
+func TestUnmarshaler(t *testing.T) {
 	m := &testMarshaler{}
-	b, err := New(WithUnmarshaler(m))
+	b, err := New(Unmarshaler(m))
 	require.NoError(t, err)
 	require.Equal(t, m, b.Unmarshaler)
 }

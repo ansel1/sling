@@ -3,19 +3,19 @@ package sling
 import (
 	"encoding/json"
 	"encoding/xml"
-	"strings"
 	"fmt"
 	goquery "github.com/google/go-querystring/query"
+	"strings"
 )
 
-var DefaultMarshaler Marshaler = &JSONMarshaler{}
-var DefaultUnmarshaler Unmarshaler = &MultiUnmarshaler{}
+var DefaultMarshaler BodyMarshaler = &JSONMarshaler{}
+var DefaultUnmarshaler BodyUnmarshaler = &MultiUnmarshaler{}
 
-type Marshaler interface {
+type BodyMarshaler interface {
 	Marshal(v interface{}) (data []byte, contentType string, err error)
 }
 
-type Unmarshaler interface {
+type BodyUnmarshaler interface {
 	Unmarshal(data []byte, contentType string, v interface{}) error
 }
 
@@ -46,7 +46,7 @@ func (m *JSONMarshaler) Marshal(v interface{}) (data []byte, contentType string,
 		data, err = json.Marshal(v)
 	}
 
-	return data, jsonContentType, err
+	return data, CONTENT_TYPE_JSON, err
 }
 
 type XMLMarshaler struct {
@@ -63,7 +63,7 @@ func (m *XMLMarshaler) Marshal(v interface{}) (data []byte, contentType string, 
 	} else {
 		data, err = xml.Marshal(v)
 	}
-	return data, xmlContentType, err
+	return data, CONTENT_TYPE_XML, err
 }
 
 type FormMarshaler struct{}
@@ -73,19 +73,19 @@ func (*FormMarshaler) Marshal(v interface{}) (data []byte, contentType string, e
 	if err != nil {
 		return nil, "", err
 	}
-	return []byte(values.Encode()), formContentType, nil
+	return []byte(values.Encode()), CONTENT_TYPE_FORM, nil
 }
 
 type MultiUnmarshaler struct {
 	jsonMar JSONMarshaler
-	xmlMar XMLMarshaler
+	xmlMar  XMLMarshaler
 }
 
 func (m *MultiUnmarshaler) Unmarshal(data []byte, contentType string, v interface{}) error {
 	switch {
-	case strings.Contains(contentType, jsonContentType):
+	case strings.Contains(contentType, CONTENT_TYPE_JSON):
 		return m.jsonMar.Unmarshal(data, contentType, v)
-	case strings.Contains(contentType, xmlContentType):
+	case strings.Contains(contentType, CONTENT_TYPE_XML):
 		return m.xmlMar.Unmarshal(data, contentType, v)
 	}
 	return fmt.Errorf("unsupported content type: %s", contentType)
