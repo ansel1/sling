@@ -164,10 +164,10 @@ func TestRequests_Request_Body(t *testing.T) {
 		expectedContentType string
 	}{
 		// Body (json)
-		{[]Option{Body(modelA)}, `{"text":"note","favorite_count":12}`, CONTENT_TYPE_JSON},
-		{[]Option{Body(&modelA)}, `{"text":"note","favorite_count":12}`, CONTENT_TYPE_JSON},
-		{[]Option{Body(&FakeModel{})}, `{}`, CONTENT_TYPE_JSON},
-		{[]Option{Body(FakeModel{})}, `{}`, CONTENT_TYPE_JSON},
+		{[]Option{Body(modelA)}, `{"text":"note","favorite_count":12}`, ContentTypeJSON},
+		{[]Option{Body(&modelA)}, `{"text":"note","favorite_count":12}`, ContentTypeJSON},
+		{[]Option{Body(&FakeModel{})}, `{}`, ContentTypeJSON},
+		{[]Option{Body(FakeModel{})}, `{}`, ContentTypeJSON},
 		// BodyForm
 		//{[]Option{Body(paramsA)}, "limit=30", formContentType},
 		//{[]Option{Body(paramsB)}, "count=25&kind_name=recent", formContentType},
@@ -195,7 +195,7 @@ func TestRequests_Request_Body(t *testing.T) {
 			} else {
 				assert.Nil(t, req.Body)
 			}
-			assert.Equal(t, c.expectedContentType, req.Header.Get(HEADER_CONTENT_TYPE))
+			assert.Equal(t, c.expectedContentType, req.Header.Get(HeaderContentType))
 		})
 	}
 }
@@ -428,7 +428,7 @@ func TestRequests_ReceiveFullContext(t *testing.T) {
 				)
 				require.NoError(t, err)
 				assert.Equal(t, 206, resp.StatusCode)
-				assert.Equal(t, `{"color":"green","count":25}`, string(body))
+				assert.Equal(t, `{"color":"green","count":25}`, body)
 				require.NotNil(t, capturedCtx)
 				assert.Equal(t, "vanilla", capturedCtx.Value("flavor"), "context should be passed through")
 				if c.succV != nil {
@@ -460,7 +460,7 @@ func TestRequests_ReceiveFullContext(t *testing.T) {
 				)
 				require.NoError(t, err)
 				assert.Equal(t, 500, resp.StatusCode)
-				assert.Equal(t, `{"color":"red","count":30}`, string(body))
+				assert.Equal(t, `{"color":"red","count":30}`, body)
 				if c.succV != nil {
 					assert.Equal(t, &testModel{}, c.succV)
 				}
@@ -478,13 +478,13 @@ func TestRequests_ReceiveFullContext(t *testing.T) {
 		resp, body, err := reqs.ReceiveFull(&mSucc, mFail)
 		require.NoError(t, err)
 		assert.Equal(t, 206, resp.StatusCode)
-		assert.Equal(t, `{"color":"green","count":25}`, string(body))
+		assert.Equal(t, `{"color":"green","count":25}`, body)
 		assert.Equal(t, "green", mSucc.Color)
 
 		resp, body, err = reqs.ReceiveFull(&mSucc, &mFail, Get("/err"))
 		require.NoError(t, err)
 		assert.Equal(t, 500, resp.StatusCode)
-		assert.Equal(t, `{"color":"red","count":30}`, string(body))
+		assert.Equal(t, `{"color":"red","count":30}`, body)
 		assert.Equal(t, "red", mFail.Color)
 	})
 
@@ -493,7 +493,7 @@ func TestRequests_ReceiveFullContext(t *testing.T) {
 		resp, body, err := reqs.ReceiveContext(context.WithValue(context.Background(), "flavor", "vanilla"), &m)
 		require.NoError(t, err)
 		assert.Equal(t, 206, resp.StatusCode)
-		assert.Equal(t, `{"color":"green","count":25}`, string(body))
+		assert.Equal(t, `{"color":"green","count":25}`, body)
 		assert.Equal(t, "green", m.Color)
 		assert.Equal(t, "vanilla", capturedCtx.Value("flavor"), "context should be passed through")
 	})
@@ -503,44 +503,10 @@ func TestRequests_ReceiveFullContext(t *testing.T) {
 		resp, body, err := reqs.Receive(&m)
 		require.NoError(t, err)
 		assert.Equal(t, 206, resp.StatusCode)
-		assert.Equal(t, `{"color":"green","count":25}`, string(body))
+		assert.Equal(t, `{"color":"green","count":25}`, body)
 		assert.Equal(t, "green", m.Color)
 	})
 }
-
-//func TestRequests_ReceiveFullContext(t *testing.T) {
-//	cl, mux, srv := testServer()
-//	defer srv.Close()
-//
-//	b, err := New(
-//		URL("http://blue.com/model.json"),
-//	)
-//	require.NoError(t, err)
-//	b.Doer = cl
-//
-//	mux.HandleFunc("/model.json", func(w http.ResponseWriter, r *http.Request) {
-//		w.Header().Set("Content-Type", "application/json")
-//		w.WriteHeader(206)
-//		w.Write([]byte(`{"color":"red","count":30}`))
-//	})
-//
-//	// this is just a special case of Receive(v, nil)
-//	var m testModel
-//	resp, body, err := b.ReceiveContext(context.Background(), &m)
-//	require.NoError(t, err)
-//	assert.Equal(t, 206, resp.StatusCode)
-//	assert.Equal(t, `{"color":"red","count":30}`, string(body))
-//	assert.Equal(t, testModel{"red", 30}, m)
-//
-//	// also make sure the version without a context works
-//	m = testModel{}
-//	resp, body, err = b.Receive(&m)
-//	require.NoError(t, err)
-//	assert.Equal(t, 206, resp.StatusCode)
-//	assert.Equal(t, `{"color":"red","count":30}`, string(body))
-//	assert.Equal(t, testModel{"red", 30}, m)
-//
-//}
 
 // Testing Utils
 

@@ -3,18 +3,19 @@ package sling
 import (
 	"encoding/base64"
 	"github.com/ansel1/merry"
+	"github.com/ansel1/sling/clients"
 	goquery "github.com/google/go-querystring/query"
 	"net/http"
 	"net/url"
 )
 
 const (
-	HEADER_ACCEPT       = "Accept"
-	HEADER_CONTENT_TYPE = "Content-Type"
+	HeaderAccept      = "Accept"
+	HeaderContentType = "Content-Type"
 
-	CONTENT_TYPE_JSON = "application/json"
-	CONTENT_TYPE_XML  = "application/xml"
-	CONTENT_TYPE_FORM = "application/x-www-form-urlencoded"
+	ContentTypeJSON = "application/json"
+	ContentTypeXML  = "application/xml"
+	ContentTypeForm = "application/x-www-form-urlencoded"
 )
 
 type Option interface {
@@ -235,9 +236,9 @@ func Form() Option {
 	return Marshaler(&FormMarshaler{})
 }
 
-func Client(opts ...ClientOption) Option {
+func Client(opts ...clients.Option) Option {
 	return OptionFunc(func(b *Requests) error {
-		c, err := NewClient(opts...)
+		c, err := clients.NewClient(opts...)
 		if err != nil {
 			return err
 		}
@@ -249,6 +250,13 @@ func Client(opts ...ClientOption) Option {
 func Use(m ...Middleware) Option {
 	return OptionFunc(func(r *Requests) error {
 		r.Middleware = append(r.Middleware, m...)
+		return nil
+	})
+}
+
+func WithDoer(d Doer) Option {
+	return OptionFunc(func(r *Requests) error {
+		r.Doer = d
 		return nil
 	})
 }

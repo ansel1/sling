@@ -46,7 +46,7 @@ func (m *JSONMarshaler) Marshal(v interface{}) (data []byte, contentType string,
 		data, err = json.Marshal(v)
 	}
 
-	return data, CONTENT_TYPE_JSON, err
+	return data, ContentTypeJSON, err
 }
 
 type XMLMarshaler struct {
@@ -63,7 +63,7 @@ func (m *XMLMarshaler) Marshal(v interface{}) (data []byte, contentType string, 
 	} else {
 		data, err = xml.Marshal(v)
 	}
-	return data, CONTENT_TYPE_XML, err
+	return data, ContentTypeXML, err
 }
 
 type FormMarshaler struct{}
@@ -73,7 +73,7 @@ func (*FormMarshaler) Marshal(v interface{}) (data []byte, contentType string, e
 	if err != nil {
 		return nil, "", err
 	}
-	return []byte(values.Encode()), CONTENT_TYPE_FORM, nil
+	return []byte(values.Encode()), ContentTypeForm, nil
 }
 
 type MultiUnmarshaler struct {
@@ -83,9 +83,9 @@ type MultiUnmarshaler struct {
 
 func (m *MultiUnmarshaler) Unmarshal(data []byte, contentType string, v interface{}) error {
 	switch {
-	case strings.Contains(contentType, CONTENT_TYPE_JSON):
+	case strings.Contains(contentType, ContentTypeJSON):
 		return m.jsonMar.Unmarshal(data, contentType, v)
-	case strings.Contains(contentType, CONTENT_TYPE_XML):
+	case strings.Contains(contentType, ContentTypeXML):
 		return m.xmlMar.Unmarshal(data, contentType, v)
 	}
 	return fmt.Errorf("unsupported content type: %s", contentType)

@@ -271,17 +271,17 @@ func (r *Requests) Do(opts ...Option) (*http.Response, error) {
 // If option arguments are passed, they are applied to this single request only.
 //
 // The context argument can be used to set a request timeout.
-func (r *Requests) ReceiveContext(ctx context.Context, successV interface{}, opts ...Option) (resp *http.Response, body []byte, err error) {
+func (r *Requests) ReceiveContext(ctx context.Context, successV interface{}, opts ...Option) (resp *http.Response, body string, err error) {
 	return r.ReceiveFullContext(ctx, successV, nil)
 }
 
 // Receive is the same as ReceiveContext, but does not require a context.
-func (r *Requests) Receive(successV interface{}, opts ...Option) (resp *http.Response, body []byte, err error) {
+func (r *Requests) Receive(successV interface{}, opts ...Option) (resp *http.Response, body string, err error) {
 	return r.ReceiveFullContext(context.Background(), successV, nil, opts...)
 }
 
 // RecieveFull is the same as RecieveFullContext, but does not require a context.
-func (r *Requests) ReceiveFull(successV, failureV interface{}, opts ...Option) (resp *http.Response, body []byte, err error) {
+func (r *Requests) ReceiveFull(successV, failureV interface{}, opts ...Option) (resp *http.Response, body string, err error) {
 	return r.ReceiveFullContext(context.Background(), successV, failureV, opts...)
 
 }
@@ -292,17 +292,22 @@ func (r *Requests) ReceiveFull(successV, failureV interface{}, opts ...Option) (
 // Any error creating the request, sending it, or decoding the response is
 // returned.
 // Receive is shorthand for calling RequestContext and DoContext.
-func (r *Requests) ReceiveFullContext(ctx context.Context, successV, failureV interface{}, opts ...Option) (resp *http.Response, body []byte, err error) {
+func (r *Requests) ReceiveFullContext(ctx context.Context, successV, failureV interface{}, opts ...Option) (resp *http.Response, body string, err error) {
 	resp, err = r.DoContext(ctx, opts...)
 	if err != nil {
 		return
 	}
 	defer resp.Body.Close()
 
-	body, err = ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return resp, body, err
+	if resp.StatusCode == 204 {
+		return
 	}
+
+	bodyS, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return
+	}
+	body = string(bodyS)
 
 	var unmarshalInto interface{}
 	if code := resp.StatusCode; 200 <= code && code <= 299 {
@@ -317,7 +322,7 @@ func (r *Requests) ReceiveFullContext(ctx context.Context, successV, failureV in
 			unmarshaler = DefaultUnmarshaler
 		}
 
-		err = unmarshaler.Unmarshal(body, resp.Header.Get("Content-Type"), unmarshalInto)
+		err = unmarshaler.Unmarshal(bodyS, resp.Header.Get("Content-Type"), unmarshalInto)
 	}
-	return resp, body, err
+	return
 }
