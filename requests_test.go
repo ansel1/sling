@@ -341,9 +341,9 @@ func TestRequests_Request_Header(t *testing.T) {
 
 func TestRequests_Request_Context(t *testing.T) {
 	reqs := Requests{}
-	req, err := reqs.RequestContext(context.WithValue(context.Background(), "color", "red"))
+	req, err := reqs.RequestContext(context.WithValue(context.Background(), colorContextKey, "red"))
 	require.NoError(t, err)
-	require.Equal(t, "red", req.Context().Value("color"))
+	require.Equal(t, "red", req.Context().Value(colorContextKey))
 }
 
 func TestRequests_Request(t *testing.T) {
@@ -351,6 +351,13 @@ func TestRequests_Request(t *testing.T) {
 	req, err := reqs.Request()
 	require.NoError(t, err)
 	require.NotNil(t, req)
+}
+
+func TestRequests_Request_options(t *testing.T) {
+	reqs := Requests{}
+	req, err := reqs.Request(Get("http://test.com/blue"))
+	require.NoError(t, err)
+	assert.Equal(t, "http://test.com/blue", req.URL.String())
 }
 
 func TestRequests_DoContext(t *testing.T) {
@@ -362,13 +369,13 @@ func TestRequests_DoContext(t *testing.T) {
 	reqs.Doer = cl
 
 	// DoContext() just creates a request and sends it to the Doer.  That's all we're confirming here
-	mux.Handle("/server", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/server", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
-	}))
+	})
 
 	var capturedCtx context.Context
 	resp, err := reqs.DoContext(
-		context.WithValue(context.Background(), "flavor", "vanilla"),
+		context.WithValue(context.Background(), colorContextKey, "purple"),
 		Use(captureRequestContextMiddleware(&capturedCtx)),
 	)
 	require.NoError(t, err)
@@ -377,7 +384,7 @@ func TestRequests_DoContext(t *testing.T) {
 	require.NotNil(t, resp)
 	assert.Equal(t, 204, resp.StatusCode)
 	require.NotNil(t, capturedCtx)
-	assert.Equal(t, "vanilla", capturedCtx.Value("flavor"), "context should be passed through")
+	assert.Equal(t, "purple", capturedCtx.Value(colorContextKey), "context should be passed through")
 	assert.Empty(t, reqs.Middleware, "option arguments should have only affected that request, should not have leaked back into the Requests objects")
 
 	t.Run("Do", func(t *testing.T) {
@@ -386,6 +393,12 @@ func TestRequests_DoContext(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 204, resp.StatusCode)
 
+		t.Run("options", func(t *testing.T) {
+			reqs := Requests{Doer: cl}
+			resp, err := reqs.Do(Get("http://blue.com/server"))
+			require.NoError(t, err)
+			require.Equal(t, 204, resp.StatusCode)
+		})
 	})
 }
 
@@ -422,7 +435,7 @@ func TestRequests_ReceiveFullContext(t *testing.T) {
 		for _, c := range cases {
 			t.Run(fmt.Sprintf("succV=%v,failV=%v", c.succV, c.failV), func(t *testing.T) {
 				resp, body, err := reqs.ReceiveFullContext(
-					context.WithValue(context.Background(), "flavor", "vanilla"),
+					context.WithValue(context.Background(), colorContextKey, "purple"),
 					c.succV,
 					c.failV,
 				)
@@ -430,7 +443,7 @@ func TestRequests_ReceiveFullContext(t *testing.T) {
 				assert.Equal(t, 206, resp.StatusCode)
 				assert.Equal(t, `{"color":"green","count":25}`, body)
 				require.NotNil(t, capturedCtx)
-				assert.Equal(t, "vanilla", capturedCtx.Value("flavor"), "context should be passed through")
+				assert.Equal(t, "purple", capturedCtx.Value(colorContextKey), "context should be passed through")
 				if c.succV != nil {
 					assert.Equal(t, &testModel{"green", 25}, c.succV)
 				}
@@ -453,7 +466,7 @@ func TestRequests_ReceiveFullContext(t *testing.T) {
 		for _, c := range cases {
 			t.Run(fmt.Sprintf("succV=%v,failV=%v", c.succV, c.failV), func(t *testing.T) {
 				resp, body, err := reqs.ReceiveFullContext(
-					context.WithValue(context.Background(), "flavor", "vanilla"),
+					context.Background(),
 					c.succV,
 					c.failV,
 					Get("/err"),
@@ -490,12 +503,12 @@ func TestRequests_ReceiveFullContext(t *testing.T) {
 
 	t.Run("ReceiveContext", func(t *testing.T) {
 		var m testModel
-		resp, body, err := reqs.ReceiveContext(context.WithValue(context.Background(), "flavor", "vanilla"), &m)
+		resp, body, err := reqs.ReceiveContext(context.WithValue(context.Background(), colorContextKey, "purple"), &m)
 		require.NoError(t, err)
 		assert.Equal(t, 206, resp.StatusCode)
 		assert.Equal(t, `{"color":"green","count":25}`, body)
 		assert.Equal(t, "green", m.Color)
-		assert.Equal(t, "vanilla", capturedCtx.Value("flavor"), "context should be passed through")
+		assert.Equal(t, "purple", capturedCtx.Value(colorContextKey), "context should be passed through")
 	})
 
 	t.Run("Receive", func(t *testing.T) {

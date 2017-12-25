@@ -5,50 +5,45 @@ import (
 	"net/http"
 )
 
+// DefaultRequests is the singleton used by the package-level Request/Do/Receive functions.
+var DefaultRequests = Requests{}
+
+// Request does the same as Requests.Request(), using the DefaultRequests.
 func Request(opts ...Option) (*http.Request, error) {
-	return RequestContext(context.Background(), opts...)
+	return DefaultRequests.Request(opts...)
 }
 
+// RequestContext does the same as Requests.RequestContext(), using the DefaultRequests.
 func RequestContext(ctx context.Context, opts ...Option) (*http.Request, error) {
-	r, err := New(opts...)
-	if err != nil {
-		return nil, err
-	}
-	return r.RequestContext(ctx)
+	return DefaultRequests.RequestContext(ctx, opts...)
 }
 
+// Do does the same as Requests.Do(), using the DefaultRequests.
 func Do(opts ...Option) (*http.Response, error) {
-	return DoContext(context.Background(), opts...)
+	return DefaultRequests.Do(opts...)
 }
 
+// DoContext does the same as Requests.DoContext(), using the DefaultRequests.
 func DoContext(ctx context.Context, opts ...Option) (*http.Response, error) {
-	r, err := New(opts...)
-	if err != nil {
-		return nil, err
-	}
-	return r.DoContext(ctx, opts...)
+	return DefaultRequests.DoContext(ctx, opts...)
 }
 
+// ReceiveContext does the same as Requests.ReceiveContext(), using the DefaultRequests.
 func ReceiveContext(ctx context.Context, successV interface{}, opts ...Option) (*http.Response, string, error) {
-	r, err := New(opts...)
-	if err != nil {
-		return nil, "", err
-	}
-	return r.ReceiveContext(ctx, successV, opts...)
+	return DefaultRequests.ReceiveContext(ctx, successV, opts...)
 }
 
+// Receive does the same as Requests.Receive(), using the DefaultRequests.
 func Receive(successV interface{}, opts ...Option) (*http.Response, string, error) {
-	return ReceiveContext(context.Background(), successV, opts...)
+	return DefaultRequests.Receive(successV, opts...)
 }
 
+// ReceiveFull does the same as Requests.ReceiveFull(), using the DefaultRequests.
 func ReceiveFull(successV, failureV interface{}, opts ...Option) (*http.Response, string, error) {
-	return ReceiveFullContext(context.Background(), successV, failureV, opts...)
+	return DefaultRequests.ReceiveFull(successV, failureV, opts...)
 }
 
+// ReceiveFullContext does the same as Requests.ReceiveFullContext(), using the DefaultRequests.
 func ReceiveFullContext(ctx context.Context, successV, failureV interface{}, opts ...Option) (*http.Response, string, error) {
-	r, err := New(opts...)
-	if err != nil {
-		return nil, "", err
-	}
-	return r.ReceiveFullContext(ctx, successV, failureV, opts...)
+	return DefaultRequests.ReceiveFullContext(ctx, successV, failureV, opts...)
 }

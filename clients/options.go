@@ -1,14 +1,15 @@
 package clients
 
 import (
-	"net/http/cookiejar"
-	"net/url"
-	"net/http"
-	"time"
 	"crypto/tls"
 	"github.com/ansel1/merry"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
+	"time"
 )
 
+// NoRedirects configures the client to no perform any redirects.
 func NoRedirects() Option {
 	return ClientOptionFunc(func(client *http.Client, _ *http.Transport) error {
 		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -18,6 +19,8 @@ func NoRedirects() Option {
 	})
 }
 
+// MaxRedirects configures the max number of redirects the client will perform before
+// giving up.
 func MaxRedirects(max int) Option {
 	return ClientOptionFunc(func(client *http.Client, _ *http.Transport) error {
 		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -30,7 +33,10 @@ func MaxRedirects(max int) Option {
 	})
 }
 
-func Cookies(opts *cookiejar.Options) Option {
+// CookieJar installs a cookie jar into the client, configured with the options argument.
+//
+// The argument will be nil.
+func CookieJar(opts *cookiejar.Options) Option {
 	return ClientOptionFunc(func(client *http.Client, _ *http.Transport) error {
 		jar, err := cookiejar.New(opts)
 		if err != nil {
@@ -41,6 +47,7 @@ func Cookies(opts *cookiejar.Options) Option {
 	})
 }
 
+// ProxyURL will proxy all calls through a single proxy URL.
 func ProxyURL(proxyURL string) Option {
 	return ClientOptionFunc(func(_ *http.Client, transport *http.Transport) error {
 		u, err := url.Parse(proxyURL)
@@ -54,6 +61,7 @@ func ProxyURL(proxyURL string) Option {
 	})
 }
 
+// ProxyFunc configures the client's proxy function.
 func ProxyFunc(f func(request *http.Request) (*url.URL, error)) Option {
 	return ClientOptionFunc(func(_ *http.Client, transport *http.Transport) error {
 		transport.Proxy = f
@@ -61,6 +69,7 @@ func ProxyFunc(f func(request *http.Request) (*url.URL, error)) Option {
 	})
 }
 
+// Timeout configures the client's Timeout property.
 func Timeout(d time.Duration) Option {
 	return ClientOptionFunc(func(client *http.Client, transport *http.Transport) error {
 		client.Timeout = d
@@ -68,13 +77,13 @@ func Timeout(d time.Duration) Option {
 	})
 }
 
-func SkipVerify() Option {
+// SkipVerify sets the TLS config's InsecureSkipVerify flag.
+func SkipVerify(skip bool) Option {
 	return ClientOptionFunc(func(client *http.Client, transport *http.Transport) error {
 		if transport.TLSClientConfig == nil {
 			transport.TLSClientConfig = &tls.Config{}
 		}
-		transport.TLSClientConfig.InsecureSkipVerify = true
+		transport.TLSClientConfig.InsecureSkipVerify = skip
 		return nil
 	})
 }
-

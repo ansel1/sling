@@ -15,15 +15,19 @@ func TestRequest(t *testing.T) {
 	require.Equal(t, "http://blue.com/red", req.URL.String())
 }
 
+type testContextKey string
+
+const colorContextKey = testContextKey("color")
+
 func TestRequestContext(t *testing.T) {
 	req, err := RequestContext(
-		context.WithValue(context.Background(), "color", "green"),
+		context.WithValue(context.Background(), colorContextKey, "green"),
 		Get("http://blue.com/red"),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, req)
 	assert.Equal(t, "http://blue.com/red", req.URL.String())
-	assert.Equal(t, "green", req.Context().Value("color"))
+	assert.Equal(t, "green", req.Context().Value(colorContextKey))
 }
 
 func TestDo(t *testing.T) {
@@ -50,7 +54,7 @@ func TestDoContext(t *testing.T) {
 
 	var ctx context.Context
 	resp, err := DoContext(
-		context.WithValue(context.Background(), "color", "blue"),
+		context.WithValue(context.Background(), colorContextKey, "blue"),
 		Get("http://blue.com/red"),
 		WithDoer(client),
 		Use(captureRequestContextMiddleware(&ctx)),
@@ -58,7 +62,7 @@ func TestDoContext(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, 204, resp.StatusCode)
-	assert.Equal(t, "blue", ctx.Value("color"))
+	assert.Equal(t, "blue", ctx.Value(colorContextKey))
 }
 
 func TestReceive(t *testing.T) {
@@ -85,7 +89,7 @@ func TestReceive(t *testing.T) {
 		var ctx context.Context
 
 		resp, body, err := ReceiveContext(
-			context.WithValue(context.Background(), "color", "yellow"),
+			context.WithValue(context.Background(), colorContextKey, "yellow"),
 			&m,
 			Get("http://blue.com/red"),
 			WithDoer(client),
@@ -96,7 +100,7 @@ func TestReceive(t *testing.T) {
 		assert.Equal(t, `{"count":25}`, body)
 		assert.Equal(t, 205, resp.StatusCode)
 		assert.Equal(t, 25, m.Count)
-		assert.Equal(t, "yellow", ctx.Value("color"))
+		assert.Equal(t, "yellow", ctx.Value(colorContextKey))
 	})
 
 	t.Run("Full", func(t *testing.T) {
@@ -136,7 +140,7 @@ func TestReceive(t *testing.T) {
 			var ctx context.Context
 
 			resp, body, err := ReceiveFullContext(
-				context.WithValue(context.Background(), "color", "yellow"),
+				context.WithValue(context.Background(), colorContextKey, "yellow"),
 				&m, nil,
 				Get("http://blue.com/red"),
 				WithDoer(client),
@@ -147,10 +151,11 @@ func TestReceive(t *testing.T) {
 			assert.Equal(t, `{"count":25}`, body)
 			assert.Equal(t, 205, resp.StatusCode)
 			assert.Equal(t, 25, m.Count)
+			assert.Equal(t, "yellow", ctx.Value(colorContextKey))
 
 			m = testModel{}
 			resp, body, err = ReceiveFullContext(
-				context.WithValue(context.Background(), "color", "yellow"),
+				context.WithValue(context.Background(), colorContextKey, "yellow"),
 				nil, &m,
 				Get("http://blue.com/err"),
 				WithDoer(client),
@@ -161,6 +166,7 @@ func TestReceive(t *testing.T) {
 			assert.Equal(t, `{"color":"red"}`, body)
 			assert.Equal(t, 500, resp.StatusCode)
 			assert.Equal(t, "red", m.Color)
+			assert.Equal(t, "yellow", ctx.Value(colorContextKey))
 		})
 	})
 }
