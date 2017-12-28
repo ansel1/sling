@@ -298,12 +298,28 @@ func Host(host string) Option {
 	})
 }
 
+func joinOpts(opts ...Option) Option {
+	return OptionFunc(func(r *Requests) error {
+		for _, opt := range opts {
+			err := opt.Apply(r)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // JSON sets Requests.Marshaler to the JSONMarshaler.
 // If the arg is true, the generated JSON will be indented.
 // The JSONMarshaler will set the Content-Type header to
 // "application/json" unless explicitly overwritten.
 func JSON(indent bool) Option {
-	return Marshaler(&JSONMarshaler{Indent: indent})
+	return joinOpts(
+		Marshaler(&JSONMarshaler{Indent: indent}),
+		ContentType(ContentTypeJSON),
+		Accept(ContentTypeJSON),
+	)
 }
 
 // XML sets Requests.Marshaler to the XMLMarshaler.
@@ -311,7 +327,11 @@ func JSON(indent bool) Option {
 // The XMLMarshaler will set the Content-Type header to
 // "application/xml" unless explicitly overwritten.
 func XML(indent bool) Option {
-	return Marshaler(&XMLMarshaler{Indent: indent})
+	return joinOpts(
+		Marshaler(&XMLMarshaler{Indent: indent}),
+		ContentType(ContentTypeXML),
+		Accept(ContentTypeXML),
+	)
 }
 
 // Form sets Requests.Marshaler to the FormMarshaler,
