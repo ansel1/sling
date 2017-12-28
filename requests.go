@@ -85,13 +85,11 @@ import (
 //     req, err        := reqs.RequestContext(ctx)
 //
 type Requests struct {
-	// Doer holds the HTTP client for used to execute requests.
-	// Defaults to http.DefaultClient.
-	Doer Doer
-
-	// Middleware wraps the Doer.  Middleware will be invoked in the order
-	// it is in this slice.
-	Middleware []Middleware
+	////////////////////////////////////////////////////////////////
+	//                                                            //
+	//  Attributes affecting the construction of http.Requests.   //
+	//                                                            //
+	////////////////////////////////////////////////////////////////
 
 	// Method defaults to "GET".
 	Method string
@@ -117,6 +115,13 @@ type Requests struct {
 	// query params already encoded in the URL
 	QueryParams url.Values
 
+	// Body can be set to a string, []byte, io.Reader, or a struct.
+	// If set to a string, []byte, or io.Reader,
+	// the value will be used as the body of the request.
+	// If set to a struct, the Marshaler
+	// will be used to marshal the value into the request body.
+	Body interface{}
+
 	// Marshaler will be used to marshal the Body value into the body
 	// of requests.  It is only used if Body is a struct value.
 	// Defaults to the DefaultMarshaler, which marshals to JSON.
@@ -125,17 +130,25 @@ type Requests struct {
 	// Marshaler will supply an appropriate one.
 	Marshaler BodyMarshaler
 
+	//////////////////////////////////////////////////////////////
+	//
+	//  Attributes related to sending requests and handling
+	//  responses.
+	//
+	////////////////////////////////////////////////////////////////
+
+	// Doer holds the HTTP client for used to execute requests.
+	// Defaults to http.DefaultClient.
+	Doer Doer
+
+	// Middleware wraps the Doer.  Middleware will be invoked in the order
+	// it is in this slice.
+	Middleware []Middleware
+
 	// Unmarshaler will be used by the Receive methods to unmarshal
 	// the response body.  Defaults to DefaultUnmarshaler, which unmarshals
 	// multiple content types based on the Content-Type response header.
 	Unmarshaler BodyUnmarshaler
-
-	// Body can be set to a string, []byte, io.Reader, or a struct.
-	// If set to a string, []byte, or io.Reader,
-	// the value will be used as the body of the request.
-	// If set to a struct, the Marshaler
-	// will be used to marshal the value into the request body.
-	Body interface{}
 }
 
 // New returns a new Requests.
