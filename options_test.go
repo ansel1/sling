@@ -43,7 +43,7 @@ func TestRequests_Apply(t *testing.T) {
 	})
 }
 
-func TestURLString(t *testing.T) {
+func TestURL(t *testing.T) {
 	cases := []string{"http://a.io/", "http://b.io", "/relPath", "relPath", ""}
 	for _, base := range cases {
 		t.Run("", func(t *testing.T) {
@@ -64,7 +64,7 @@ func TestURLString(t *testing.T) {
 	})
 }
 
-func TestRelativeURLString(t *testing.T) {
+func TestRelativeURL(t *testing.T) {
 	cases := []struct {
 		base     string
 		relPath  string
